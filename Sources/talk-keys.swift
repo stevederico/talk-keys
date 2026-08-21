@@ -61,11 +61,10 @@ func cancelDictateHold() {
     dictateHoldWork = nil
 }
 
-func insertTypedText(_ string: String) {
-    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
+func typeUTF16(_ string: String) {
+    guard !string.isEmpty else { return }
     let src = CGEventSource(stateID: .hidSystemState)
-    let units = Array(trimmed.utf16)
+    let units = Array(string.utf16)
     var i = 0
     while i < units.count {
         let end = min(i + 20, units.count)
@@ -81,7 +80,25 @@ func insertTypedText(_ string: String) {
         up.post(tap: .cghidEventTap)
         i = end
     }
-    fputs("dictate typed \(trimmed.count) chars\n", stderr)
+}
+
+func backspaceChars(_ n: Int) {
+    guard n > 0 else { return }
+    let src = CGEventSource(stateID: .hidSystemState)
+    for _ in 0..<n {
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0x33, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: 0x33, keyDown: false) else { return }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+}
+
+func streamDictate(_ next: String, typed: inout String) {
+    if next == typed { return }
+    let prefix = zip(typed, next).prefix(while: { $0 == $1 }).count
+    backspaceChars(typed.count - prefix)
+    typeUTF16(String(next.dropFirst(prefix)))
+    typed = next
 }
 
 final class DictateEngine {
@@ -92,11 +109,13 @@ final class DictateEngine {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var lastText = ""
-    private var usingSpeech = false
+    private var typed = ""
+    private var live = false
 
     func start() {
         lastText = ""
-        usingSpeech = false
+        typed = ""
+        live = false
         AVCaptureDevice.requestAccess(for: .audio) { mic in
             guard mic else {
                 fputs("dictate: microphone denied\n", stderr)
@@ -136,32 +155,35 @@ final class DictateEngine {
             fputs("dictate: audio \(error.localizedDescription)\n", stderr)
             return
         }
-        usingSpeech = true
-        fputs("right-command hold → dictate start (speech)\n", stderr)
+        live = true
+        fputs("right-command hold → dictate start (stream)\n", stderr)
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            if let result {
-                self?.lastText = result.bestTranscription.formattedString
-            }
-            if let error {
-                fputs("dictate: \(error.localizedDescription)\n", stderr)
+            DispatchQueue.main.async {
+                guard let self, self.live else { return }
+                if let result {
+                    let next = result.bestTranscription.formattedString
+                    self.lastText = next
+                    streamDictate(next, typed: &self.typed)
+                }
+                if let error {
+                    fputs("dictate: \(error.localizedDescription)\n", stderr)
+                }
             }
         }
     }
 
     func stop() {
+        live = false
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
         request = nil
         task?.cancel()
         task = nil
-        usingSpeech = false
-        let text = lastText
+        streamDictate(lastText, typed: &typed)
+        fputs("right-command hold → dictate stop «\(typed)»\n", stderr)
         lastText = ""
-        fputs("right-command hold → dictate stop «\(text)»\n", stderr)
-        if !text.isEmpty {
-            insertTypedText(text)
-        }
+        typed = ""
     }
 }
 

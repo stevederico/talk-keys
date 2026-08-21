@@ -42,7 +42,7 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 - **Option+key chords** still work (accents, Warp Alt on Left Option, menus)
 
 ### 🎙️ **Hold to dictate**
-- **Hold Right Command ~200ms** records; **release** types the transcript into the focused app
+- **Hold Right Command ~200ms** records; words **type as they are recognized**; release finalizes
 - Uses Apple **Speech** (on-device when available), then HID unicode keystrokes (works in Warp / Grok)
 - **Cmd+C / Cmd+V** and other Right Command chords are unchanged (hold timer cancels)
 

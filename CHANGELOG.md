@@ -1,3 +1,7 @@
+0.19.0
+
+  Stream dictate as heard
+
 0.18.0
 
   Type dictation into Warp
