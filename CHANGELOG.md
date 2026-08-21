@@ -1,3 +1,7 @@
+0.22.0
+
+  Keep sample plist generic
+
 0.21.0
 
   Paste dictate into Warp

@@ -38,6 +38,10 @@ write_plist() {
   # Launch via `open -W -a` so the process inherits Talk Keys.app TCC grants.
   # Running Contents/MacOS/talk-keys directly from launchd often gets AX=false.
   mkdir -p "$HOME/Library/LaunchAgents"
+  # Never write through a symlink into the repo sample (that baked $HOME into git).
+  if [ -L "$PLIST_DEST" ]; then
+    rm -f "$PLIST_DEST"
+  fi
   cat > "$PLIST_DEST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
