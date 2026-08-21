@@ -1,3 +1,7 @@
+0.23.0
+
+  Copy selection from front app
+
 0.22.0
 
   Keep sample plist generic

@@ -32,14 +32,41 @@ func sayRunning() -> Bool {
     return p.terminationStatus == 0
 }
 
+func clipboardString() -> String {
+    (NSPasteboard.general.string(forType: .string) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func axSelectedText() -> String? {
+    guard let app = NSWorkspace.shared.frontmostApplication,
+          app.processIdentifier != pid_t(getpid()) else { return nil }
+    let appEl = AXUIElementCreateApplication(app.processIdentifier)
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+          let focused,
+          CFGetTypeID(focused) == AXUIElementGetTypeID()
+    else { return nil }
+    let el = unsafeBitCast(focused, to: AXUIElement.self)
+    var selected: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &selected) == .success
+    else { return nil }
+    let s = (selected as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (s?.isEmpty == false) ? s : nil
+}
+
 func pressCopy() {
-    let src = CGEventSource(stateID: .hidSystemState)
-    guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0x08, keyDown: true),
+    guard let src = CGEventSource(stateID: .hidSystemState),
+          let down = CGEvent(keyboardEventSource: src, virtualKey: 0x08, keyDown: true),
           let up = CGEvent(keyboardEventSource: src, virtualKey: 0x08, keyDown: false) else { return }
     down.flags = .maskCommand
     up.flags = .maskCommand
-    down.post(tap: .cghidEventTap)
-    up.post(tap: .cghidEventTap)
+    if let pid = targetPid() {
+        down.postToPid(pid)
+        up.postToPid(pid)
+    } else {
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
 }
 
 func speak(_ text: String) {
@@ -239,17 +266,23 @@ func handleHotKey() {
         fputs("stop\n", stderr)
         return
     }
+    if let ax = axSelectedText() {
+        fputs("speak AX \(ax.count) chars\n", stderr)
+        speak(ax)
+        return
+    }
+    let before = clipboardString()
     if AXIsProcessTrusted() {
         pressCopy()
-        Thread.sleep(forTimeInterval: 0.2)
+        Thread.sleep(forTimeInterval: 0.25)
     }
-    let text = NSPasteboard.general.string(forType: .string) ?? ""
-    guard !text.isEmpty else {
+    let after = clipboardString()
+    guard !after.isEmpty else {
         fputs("empty\n", stderr)
         return
     }
-    fputs("speak \(text.count) chars\n", stderr)
-    speak(text)
+    fputs("speak \(after.count) chars clip=\(after == before ? "same" : "copied") pid=\(targetPid() ?? 0)\n", stderr)
+    speak(after)
 }
 
 private func eventTapCallback(
