@@ -137,7 +137,7 @@ doctor() {
   echo "App: $APP"
   ls -la "$BIN" 2>/dev/null || echo "missing binary"
   echo "Tap Right Option once, then: tail -f $LOG"
-  echo "Expect: right-option down → right-option alone → speak"
+  echo "Expect: right-option alone → speak; right-command hold → dictate start|stop"
 }
 
 cmd="${1:-status}"

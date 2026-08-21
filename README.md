@@ -2,7 +2,7 @@
   <img src="docs/characters/talku-banner.jpg" width="100%" alt="Talku">
   <h1 align="center" style="border-bottom: none; margin-bottom: 0;">Talk Keys</h1>
   <h3 align="center" style="margin-top: 0; font-weight: normal;">
-    tap right option to speak selected text on macos
+    tap right option to speak · hold right command to dictate
   </h3>
   <p><em>the little speaker who reads what you highlight</em> · starring <strong>Talku</strong></p>
 </div>
@@ -28,7 +28,9 @@ If the toggles were already on from an older build, turn them **off then on**. T
 talk-keys restart
 ```
 
-Select text. Tap **Right Option**. Tap again to stop.
+Select text. Tap **Right Option** to hear it. Hold **Right Command** to dictate into the focused field.
+
+Turn on **System Settings → Keyboard → Dictation**. Talk Keys starts/stops it with **Fn-D** (Apple’s shortcut).
 
 <br />
 
@@ -38,6 +40,11 @@ Select text. Tap **Right Option**. Tap again to stop.
 - **Right Option alone** speaks the current highlight (or the clipboard)
 - **Second tap** stops `say`
 - **Option+key chords** still work (accents, Warp Alt on Left Option, menus)
+
+### 🎙️ **Hold to dictate**
+- **Hold Right Command ~200ms** starts macOS Dictation into the focused field
+- **Release** stops Dictation
+- **Cmd+C / Cmd+V** and other Right Command chords are unchanged (hold timer cancels)
 
 ### 🍡 **Talku**
 - **Yuru-chara mascot** for the product (same idea as Snap Cat’s Snapu)
@@ -62,6 +69,7 @@ Right Option is a modifier. Carbon `RegisterEventHotKey` cannot bind a modifier 
 1. **flagsChanged** on keycode `61` (`kVK_RightOption`): press starts an “alone” wait; any other keyDown while held cancels it.
 2. **Release with no other key** copies the front app selection (`Cmd+C` via Accessibility) if needed, then reads the pasteboard.
 3. **`/usr/bin/say`** speaks that text. A second Right Option tap runs `pkill -x say`.
+4. **Right Command** (`54`) hold ~200ms with no other key posts **Fn-D** (start Dictation). Release posts Fn-D again (stop). A Command chord cancels the timer.
 
 `listenOnly` taps can “succeed” with no events when TCC is missing. Talk Keys uses **`.defaultTap`** (returns nil without Accessibility) and keeps Option+key passthrough.
 
@@ -114,7 +122,7 @@ On first launch with either grant missing, Talk Keys shows **Talk Keys Needs Per
 
 ```
 talk-keys permissions AX=true ListenEvent=true
-talk-keys: Right Option tap armed
+talk-keys: Right Option tap + Right Command hold armed
 ```
 
 Recompile / re-sign changes the app CDHash and **drops both grants**. `talk-keys restart` does not rebuild on purpose. After a real `install` rebuild, toggle Talk Keys off/on in both panes, then `talk-keys restart`.
@@ -127,7 +135,7 @@ Also allow the agent in **Login Items** if macOS asks.
 
 Talk Keys is a local LaunchAgent. No network. No analytics. No account.
 
-It **does** install a session keyboard tap (Input Monitoring) and may post `Cmd+C` (Accessibility). The tap only acts on a **bare Right Option** press/release. Other keys are ignored. Spoken text is whatever was selected or already on the clipboard; it is passed to `/usr/bin/say` and is not uploaded.
+It **does** install a session keyboard tap (Input Monitoring) and may post `Cmd+C` or **Fn-D** (Accessibility). Right Option tap speaks local `say` audio. Right Command hold starts **macOS Dictation** (Apple’s service, into the focused field). Talk Keys does not upload audio itself.
 
 Source of truth: `Sources/talk-keys.swift`.
 
@@ -187,10 +195,12 @@ Healthy tap:
 
 ```
 talk-keys permissions AX=true ListenEvent=true
-talk-keys: Right Option tap armed
+talk-keys: Right Option tap + Right Command hold armed
 right-option down
 right-option alone → speak
 speak 128 chars
+right-command hold → dictate start
+right-command hold → dictate stop
 ```
 
 | Line | Meaning |
@@ -206,7 +216,7 @@ speak 128 chars
 ## 🔧 Troubleshooting
 
 **Tap does nothing in Warp or Grok**
-- `talk-keys status` must show `AX=true ListenEvent=true` **and** `Right Option tap armed`
+- `talk-keys status` must show `AX=true ListenEvent=true` **and** `Right Option tap + Right Command hold armed`
 - Toggle Talk Keys in Accessibility **and** Input Monitoring, then `talk-keys restart` (not `install`)
 - Drag-select in Warp (`copy_on_select`); a keyboard caret is not a selection
 

@@ -1,14 +1,22 @@
-// talk-keys — tap Right Option to speak the current highlight. Second tap stops.
-// Needs Input Monitoring (ListenEvent) for the CGEventTap, and Accessibility to
-// send Cmd+C when the pasteboard is empty. Modifier-alone cannot use Carbon hotkeys.
+// talk-keys — Right Option tap speaks the highlight. Right Command hold dictates.
+// Needs Input Monitoring for the CGEventTap, and Accessibility to send Cmd+C.
 import AppKit
 import ApplicationServices
+import Darwin
 import Foundation
 
 private let rightOptionKeyCode: Int64 = 61 // kVK_RightOption
+private let rightCommandKeyCode: Int64 = 54 // kVK_RightCommand
+private let dKeyCode: CGKeyCode = 0x02
+private let holdToDictate: TimeInterval = 0.2
+private let myPid = Int64(getpid())
 
 private var rightOptionDown = false
 private var rightOptionAlone = false
+private var rightCommandDown = false
+private var rightCommandAlone = false
+private var isDictating = false
+private var dictateHoldWork: DispatchWorkItem?
 private var eventTap: CFMachPort?
 
 func sayRunning() -> Bool {
@@ -44,6 +52,46 @@ func speak(_ text: String) {
         try? pipe.fileHandleForWriting.write(contentsOf: data)
     }
     try? pipe.fileHandleForWriting.close()
+}
+
+func cancelDictateHold() {
+    dictateHoldWork?.cancel()
+    dictateHoldWork = nil
+}
+
+func postFnD() {
+    let src = CGEventSource(stateID: .hidSystemState)
+    guard let down = CGEvent(keyboardEventSource: src, virtualKey: dKeyCode, keyDown: true),
+          let up = CGEvent(keyboardEventSource: src, virtualKey: dKeyCode, keyDown: false) else { return }
+    down.flags = .maskSecondaryFn
+    up.flags = .maskSecondaryFn
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+}
+
+func startDictation() {
+    guard !isDictating else { return }
+    isDictating = true
+    fputs("right-command hold → dictate start\n", stderr)
+    postFnD()
+}
+
+func stopDictation() {
+    guard isDictating else { return }
+    isDictating = false
+    fputs("right-command hold → dictate stop\n", stderr)
+    postFnD()
+}
+
+func scheduleDictateHold() {
+    cancelDictateHold()
+    let work = DispatchWorkItem {
+        if rightCommandDown && rightCommandAlone {
+            startDictation()
+        }
+    }
+    dictateHoldWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + holdToDictate, execute: work)
 }
 
 func handleHotKey() {
@@ -83,6 +131,11 @@ private func eventTapCallback(
         return Unmanaged.passUnretained(event)
     }
 
+    let srcPid = event.getIntegerValueField(.eventSourceUnixProcessID)
+    if srcPid == myPid {
+        return Unmanaged.passUnretained(event)
+    }
+
     let keycode = event.getIntegerValueField(.keyboardEventKeycode)
 
     if type == .flagsChanged && keycode == rightOptionKeyCode {
@@ -105,8 +158,30 @@ private func eventTapCallback(
         return Unmanaged.passUnretained(event)
     }
 
-    if type == .keyDown && rightOptionDown {
-        rightOptionAlone = false
+    if type == .flagsChanged && keycode == rightCommandKeyCode {
+        if !rightCommandDown {
+            rightCommandDown = true
+            rightCommandAlone = true
+            DispatchQueue.main.async { scheduleDictateHold() }
+        } else {
+            rightCommandDown = false
+            cancelDictateHold()
+            if isDictating {
+                DispatchQueue.main.async { stopDictation() }
+            }
+            rightCommandAlone = false
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    if type == .keyDown {
+        if rightOptionDown {
+            rightOptionAlone = false
+        }
+        if rightCommandDown {
+            rightCommandAlone = false
+            cancelDictateHold()
+        }
     }
 
     return Unmanaged.passUnretained(event)
@@ -152,7 +227,7 @@ func armTap() {
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    fputs("talk-keys: Right Option tap armed\n", stderr)
+    fputs("talk-keys: Right Option tap + Right Command hold armed\n", stderr)
 }
 
 func promptIfNeeded() {
