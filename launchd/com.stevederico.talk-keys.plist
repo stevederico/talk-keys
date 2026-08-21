@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Sample only. ./scripts/talk-keys install writes the live agent with $HOME. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.stevederico.talk-keys</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.stevederico.talk-keys</string>
+	</array>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/open</string>
+		<string>-W</string>
+		<string>-n</string>
+		<string>-g</string>
+		<string>-a</string>
+		<string>/Users/you/Applications/Talk Keys.app</string>
+		<string>-o</string>
+		<string>/tmp/talk-keys.log</string>
+		<string>--stderr</string>
+		<string>/tmp/talk-keys.log</string>
+	</array>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/tmp/talk-keys.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/talk-keys.log</string>
+</dict>
+</plist>
