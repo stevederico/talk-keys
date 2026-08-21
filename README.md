@@ -1,8 +1,5 @@
 <div align="center">
   <img src="docs/characters/talku-banner.jpg" width="100%" alt="Talku">
-  <p align="center" style="margin-top: 24px; margin-bottom: 5px;">
-    <img src="docs/characters/talku.jpg" width="180" alt="Talku">
-  </p>
   <h1 align="center" style="border-bottom: none; margin-bottom: 0;">Talk Keys</h1>
   <h3 align="center" style="margin-top: 0; font-weight: normal;">
     tap right option to speak selected text on macos
