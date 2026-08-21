@@ -1,3 +1,7 @@
+0.21.0
+
+  Paste dictate into Warp
+
 0.20.0
 
   Type without Command held

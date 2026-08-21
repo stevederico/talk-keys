@@ -43,7 +43,7 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 
 ### 🎙️ **Hold to dictate**
 - **Hold Right Command ~200ms** records; words **type as they are recognized**; release finalizes
-- Uses Apple **Speech** (on-device when available), then HID unicode keystrokes (works in Warp / Grok)
+- Uses Apple **Speech** (on-device when available), then pastes into the front app (Warp / Grok)
 - **Cmd+C / Cmd+V** and other Right Command chords are unchanged (hold timer cancels)
 
 ### 🍡 **Talku**
@@ -69,7 +69,7 @@ Right Option is a modifier. Carbon `RegisterEventHotKey` cannot bind a modifier 
 1. **flagsChanged** on keycode `61` (`kVK_RightOption`): press starts an “alone” wait; any other keyDown while held cancels it.
 2. **Release with no other key** copies the front app selection (`Cmd+C` via Accessibility) if needed, then reads the pasteboard.
 3. **`/usr/bin/say`** speaks that text. A second Right Option tap runs `pkill -x say`.
-4. **Right Command** (`54`) hold ~200ms starts Speech recognition. Release types the transcript as keystrokes so terminals get the text.
+4. **Right Command** (`54`) hold ~200ms starts Speech recognition. New words are pasted into the front app (Warp PTY), not typed as HID unicode.
 
 `listenOnly` taps can “succeed” with no events when TCC is missing. Talk Keys uses **`.defaultTap`** (returns nil without Accessibility) and keeps Option+key passthrough.
 
