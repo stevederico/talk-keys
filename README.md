@@ -30,7 +30,7 @@ talk-keys restart
 
 Select text. Tap **Right Option** to hear it. Hold **Right Command** to dictate into the focused field.
 
-Turn on **System Settings → Keyboard → Dictation**. Talk Keys starts/stops it with **Fn-D** (Apple’s shortcut).
+Allow **Microphone** and **Speech Recognition** when prompted. Hold types into Warp, Grok, and other PTYs (system Dictation only fills AppKit text views).
 
 <br />
 
@@ -42,8 +42,8 @@ Turn on **System Settings → Keyboard → Dictation**. Talk Keys starts/stops i
 - **Option+key chords** still work (accents, Warp Alt on Left Option, menus)
 
 ### 🎙️ **Hold to dictate**
-- **Hold Right Command ~200ms** starts macOS Dictation into the focused field
-- **Release** stops Dictation
+- **Hold Right Command ~200ms** records; **release** types the transcript into the focused app
+- Uses Apple **Speech** (on-device when available), then HID unicode keystrokes (works in Warp / Grok)
 - **Cmd+C / Cmd+V** and other Right Command chords are unchanged (hold timer cancels)
 
 ### 🍡 **Talku**
@@ -69,7 +69,7 @@ Right Option is a modifier. Carbon `RegisterEventHotKey` cannot bind a modifier 
 1. **flagsChanged** on keycode `61` (`kVK_RightOption`): press starts an “alone” wait; any other keyDown while held cancels it.
 2. **Release with no other key** copies the front app selection (`Cmd+C` via Accessibility) if needed, then reads the pasteboard.
 3. **`/usr/bin/say`** speaks that text. A second Right Option tap runs `pkill -x say`.
-4. **Right Command** (`54`) hold ~200ms with no other key posts **Fn-D** (start Dictation). Release posts Fn-D again (stop). A Command chord cancels the timer.
+4. **Right Command** (`54`) hold ~200ms starts Speech recognition. Release types the transcript as keystrokes so terminals get the text.
 
 `listenOnly` taps can “succeed” with no events when TCC is missing. Talk Keys uses **`.defaultTap`** (returns nil without Accessibility) and keeps Option+key passthrough.
 
@@ -135,7 +135,7 @@ Also allow the agent in **Login Items** if macOS asks.
 
 Talk Keys is a local LaunchAgent. No network. No analytics. No account.
 
-It **does** install a session keyboard tap (Input Monitoring) and may post `Cmd+C` or **Fn-D** (Accessibility). Right Option tap speaks local `say` audio. Right Command hold starts **macOS Dictation** (Apple’s service, into the focused field). Talk Keys does not upload audio itself.
+It **does** install a session keyboard tap (Input Monitoring), may post `Cmd+C`, and uses the **microphone** for hold-to-dictate. Speech is on-device when the recognizer supports it. Transcripts are typed locally. No Talk Keys network.
 
 Source of truth: `Sources/talk-keys.swift`.
 

@@ -1,3 +1,7 @@
+0.18.0
+
+  Type dictation into Warp
+
 0.17.0
 
   Hold Right Command dictate

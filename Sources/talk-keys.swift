@@ -1,13 +1,15 @@
 // talk-keys — Right Option tap speaks the highlight. Right Command hold dictates.
-// Needs Input Monitoring for the CGEventTap, and Accessibility to send Cmd+C.
+// Dictation uses Speech (on-device when it can), then types into the focused app
+// (Warp/Grok PTYs ignore macOS Dictation’s NSText insert).
 import AppKit
 import ApplicationServices
+import AVFoundation
 import Darwin
 import Foundation
+import Speech
 
 private let rightOptionKeyCode: Int64 = 61 // kVK_RightOption
 private let rightCommandKeyCode: Int64 = 54 // kVK_RightCommand
-private let dKeyCode: CGKeyCode = 0x02
 private let holdToDictate: TimeInterval = 0.2
 private let myPid = Int64(getpid())
 
@@ -59,28 +61,120 @@ func cancelDictateHold() {
     dictateHoldWork = nil
 }
 
-func postFnD() {
+func insertTypedText(_ string: String) {
+    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
     let src = CGEventSource(stateID: .hidSystemState)
-    guard let down = CGEvent(keyboardEventSource: src, virtualKey: dKeyCode, keyDown: true),
-          let up = CGEvent(keyboardEventSource: src, virtualKey: dKeyCode, keyDown: false) else { return }
-    down.flags = .maskSecondaryFn
-    up.flags = .maskSecondaryFn
-    down.post(tap: .cghidEventTap)
-    up.post(tap: .cghidEventTap)
+    let units = Array(trimmed.utf16)
+    var i = 0
+    while i < units.count {
+        let end = min(i + 20, units.count)
+        let chunk = Array(units[i..<end])
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) else { break }
+        chunk.withUnsafeBufferPointer { buf in
+            guard let p = buf.baseAddress else { return }
+            down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: p)
+            up.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: p)
+        }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        i = end
+    }
+    fputs("dictate typed \(trimmed.count) chars\n", stderr)
+}
+
+final class DictateEngine {
+    static let shared = DictateEngine()
+
+    private let recognizer = SFSpeechRecognizer(locale: Locale.current)
+    private let audioEngine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var lastText = ""
+    private var usingSpeech = false
+
+    func start() {
+        lastText = ""
+        usingSpeech = false
+        AVCaptureDevice.requestAccess(for: .audio) { mic in
+            guard mic else {
+                fputs("dictate: microphone denied\n", stderr)
+                return
+            }
+            SFSpeechRecognizer.requestAuthorization { status in
+                DispatchQueue.main.async {
+                    guard status == .authorized, let recognizer = self.recognizer, recognizer.isAvailable else {
+                        fputs("dictate: speech not authorized (\(status.rawValue))\n", stderr)
+                        return
+                    }
+                    self.begin(recognizer)
+                }
+            }
+        }
+    }
+
+    private func begin(_ recognizer: SFSpeechRecognizer) {
+        task?.cancel()
+        task = nil
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        if recognizer.supportsOnDeviceRecognition {
+            request.requiresOnDeviceRecognition = true
+        }
+        self.request = request
+        let input = audioEngine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            request.append(buffer)
+        }
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+        } catch {
+            fputs("dictate: audio \(error.localizedDescription)\n", stderr)
+            return
+        }
+        usingSpeech = true
+        fputs("right-command hold → dictate start (speech)\n", stderr)
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            if let result {
+                self?.lastText = result.bestTranscription.formattedString
+            }
+            if let error {
+                fputs("dictate: \(error.localizedDescription)\n", stderr)
+            }
+        }
+    }
+
+    func stop() {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        request?.endAudio()
+        request = nil
+        task?.cancel()
+        task = nil
+        usingSpeech = false
+        let text = lastText
+        lastText = ""
+        fputs("right-command hold → dictate stop «\(text)»\n", stderr)
+        if !text.isEmpty {
+            insertTypedText(text)
+        }
+    }
 }
 
 func startDictation() {
     guard !isDictating else { return }
     isDictating = true
-    fputs("right-command hold → dictate start\n", stderr)
-    postFnD()
+    DictateEngine.shared.start()
 }
 
 func stopDictation() {
     guard isDictating else { return }
     isDictating = false
-    fputs("right-command hold → dictate stop\n", stderr)
-    postFnD()
+    DictateEngine.shared.stop()
 }
 
 func scheduleDictateHold() {
