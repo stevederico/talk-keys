@@ -61,43 +61,77 @@ func cancelDictateHold() {
     dictateHoldWork = nil
 }
 
+func hidSource() -> CGEventSource? {
+    CGEventSource(stateID: .privateState)
+}
+
+func postKey(_ code: CGKeyCode, flags: CGEventFlags = []) {
+    guard let src = hidSource(),
+          let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true),
+          let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) else { return }
+    down.flags = flags
+    up.flags = flags
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+}
+
+func replayRightCommandDown() {
+    guard let src = CGEventSource(stateID: .hidSystemState),
+          let e = CGEvent(keyboardEventSource: src, virtualKey: 0x36, keyDown: true) else { return }
+    e.flags = .maskCommand
+    e.post(tap: .cghidEventTap)
+}
+
+private let letterKeys: [Character: CGKeyCode] = [
+    "a": 0x00, "s": 0x01, "d": 0x02, "f": 0x03, "h": 0x04, "g": 0x05,
+    "z": 0x06, "x": 0x07, "c": 0x08, "v": 0x09, "b": 0x0B, "q": 0x0C,
+    "w": 0x0D, "e": 0x0E, "r": 0x0F, "y": 0x10, "t": 0x11,
+    "1": 0x12, "2": 0x13, "3": 0x14, "4": 0x15, "6": 0x16, "5": 0x17,
+    "9": 0x19, "7": 0x1A, "8": 0x1C, "0": 0x1D,
+    "o": 0x1F, "u": 0x20, "i": 0x22, "p": 0x23,
+    "l": 0x25, "j": 0x26, "k": 0x28, "n": 0x2D, "m": 0x2E,
+    "-": 0x1B, "=": 0x18, "'": 0x27, ",": 0x2B, ".": 0x2F, "/": 0x2C,
+]
+
 func typeUTF16(_ string: String) {
     guard !string.isEmpty else { return }
-    let src = CGEventSource(stateID: .hidSystemState)
-    let units = Array(string.utf16)
-    var i = 0
-    while i < units.count {
-        let end = min(i + 20, units.count)
-        let chunk = Array(units[i..<end])
-        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
-              let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) else { break }
-        chunk.withUnsafeBufferPointer { buf in
-            guard let p = buf.baseAddress else { return }
-            down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: p)
-            up.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: p)
+    for ch in string {
+        if ch == " " { postKey(0x31); continue }
+        if ch == "\n" { postKey(0x24); continue }
+        if let lower = ch.lowercased().first, let code = letterKeys[lower] {
+            postKey(code, flags: ch.isUppercase ? .maskShift : [])
+            continue
         }
+        guard let src = hidSource(),
+              let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) else { continue }
+        let units = Array(String(ch).utf16)
+        units.withUnsafeBufferPointer { buf in
+            guard let p = buf.baseAddress else { return }
+            down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: p)
+            up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: p)
+        }
+        down.flags = []
+        up.flags = []
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
-        i = end
     }
 }
 
 func backspaceChars(_ n: Int) {
     guard n > 0 else { return }
-    let src = CGEventSource(stateID: .hidSystemState)
-    for _ in 0..<n {
-        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0x33, keyDown: true),
-              let up = CGEvent(keyboardEventSource: src, virtualKey: 0x33, keyDown: false) else { return }
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-    }
+    for _ in 0..<n { postKey(0x33) }
 }
 
 func streamDictate(_ next: String, typed: inout String) {
     if next == typed { return }
     let prefix = zip(typed, next).prefix(while: { $0 == $1 }).count
     backspaceChars(typed.count - prefix)
-    typeUTF16(String(next.dropFirst(prefix)))
+    let suffix = String(next.dropFirst(prefix))
+    if !suffix.isEmpty {
+        fputs("dictate +\(suffix)\n", stderr)
+        typeUTF16(suffix)
+    }
     typed = next
 }
 
@@ -279,24 +313,31 @@ private func eventTapCallback(
             rightCommandDown = true
             rightCommandAlone = true
             DispatchQueue.main.async { scheduleDictateHold() }
-        } else {
-            rightCommandDown = false
-            cancelDictateHold()
-            if isDictating {
-                DispatchQueue.main.async { stopDictation() }
-            }
-            rightCommandAlone = false
+            return nil
         }
-        return Unmanaged.passUnretained(event)
+        rightCommandDown = false
+        cancelDictateHold()
+        let wasChord = !rightCommandAlone
+        let dictating = isDictating
+        rightCommandAlone = false
+        if dictating {
+            DispatchQueue.main.async { stopDictation() }
+            return nil
+        }
+        if wasChord {
+            return Unmanaged.passUnretained(event)
+        }
+        return nil
     }
 
     if type == .keyDown {
         if rightOptionDown {
             rightOptionAlone = false
         }
-        if rightCommandDown {
+        if rightCommandDown && !isDictating {
             rightCommandAlone = false
             cancelDictateHold()
+            replayRightCommandDown()
         }
     }
 

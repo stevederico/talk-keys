@@ -1,3 +1,7 @@
+0.20.0
+
+  Type without Command held
+
 0.19.0
 
   Stream dictate as heard
