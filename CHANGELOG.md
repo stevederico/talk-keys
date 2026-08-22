@@ -1,3 +1,9 @@
+0.25.0
+
+  Document open item
+  Require both grants
+  Fix CLI install
+
 0.24.0
 
   Add AGENTS.md

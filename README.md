@@ -17,16 +17,20 @@ cd talk-keys
 ./scripts/talk-keys install
 ```
 
-Turn on **Talk Keys** in:
+Turn on **Talk Keys** in **both** panes (not optional):
 
 1. System Settings → Privacy & Security → **Accessibility**
 2. System Settings → Privacy & Security → **Input Monitoring**
 
-If the toggles were already on from an older build, turn them **off then on**. Then:
+Accessibility off → `tap not created`. Input Monitoring off → the tap never sees Right Option. If the toggles were already on from an older build, turn them **off then on**. Then:
 
 ```bash
 talk-keys restart
 ```
+
+`talk-keys status` must show `AX=true ListenEvent=true` and `Right Option tap + Right Command hold armed`. Toggles do not attach to the already-running process until restart.
+
+macOS will ask to allow a Background Item named **open**. That **is** Talk Keys (launchd runs `/usr/bin/open` so TCC sticks to the app). Allow it. Deny it and Talk Keys will not start at login.
 
 Select text. Tap **Right Option** to hear it. Hold **Right Command** to dictate into the focused field.
 
@@ -58,7 +62,8 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 ### 🖥️ **Always on**
 - **Talk Keys.app** at `~/Applications/Talk Keys.app` (menu-bar-less, `LSUIElement`)
 - **LaunchAgent** `com.stevederico.talk-keys` starts at login and respawns
-- **CLI** at `scripts/talk-keys` (dotfiles links this to `~/.local/bin/talk-keys`)
+- **Login Items** lists this as **open**, not Talk Keys. Leave it on.
+- **CLI** at `scripts/talk-keys` (put it on PATH)
 
 <br />
 
@@ -85,7 +90,9 @@ Warp: enable **copy on select** (already in this machine’s Warp config) so a d
 
 ## 🛠️ CLI
 
-Linked to `~/.local/bin/talk-keys` by `~/.dotfiles/setup.sh`.
+```bash
+ln -sfn "$(pwd)/scripts/talk-keys" ~/.local/bin/talk-keys
+```
 
 | Command | What it does |
 |---|---|
@@ -116,9 +123,9 @@ macOS treats keyboard taps and synthetic `Cmd+C` as two different TCC services.
 | **Accessibility** | `AXIsProcessTrusted` | Post `Cmd+C`; create a `.defaultTap` |
 | **Input Monitoring** | `CGPreflightListenEventAccess` | Read key events system-wide |
 
-Without Input Monitoring the daemon can look “armed” and still never see Right Option (the Warp / Grok failure mode).
+Without Input Monitoring the daemon can look “armed” and still never see Right Option (the Warp / Grok failure mode). Accessibility off is louder: `tap not created`.
 
-On first launch with either grant missing, Talk Keys shows **Talk Keys Needs Permission** and opens the Settings panes. After you toggle, wait for:
+On first launch with either grant missing, Talk Keys shows **Talk Keys Needs Permission** and opens the Settings panes. Toggle Talk Keys off/on in **both** panes, then `talk-keys restart`. The running process keeps `AX=false` until it relaunches. Wait for:
 
 ```
 talk-keys permissions AX=true ListenEvent=true
@@ -127,7 +134,7 @@ talk-keys: Right Option tap + Right Command hold armed
 
 Recompile / re-sign changes the app CDHash and **drops both grants**. `talk-keys restart` does not rebuild on purpose. After a real `install` rebuild, toggle Talk Keys off/on in both panes, then `talk-keys restart`.
 
-Also allow the agent in **Login Items** if macOS asks.
+**Login Items:** System Settings → General → Login Items & Extensions → Allow in the Background. The item is named **open** (not Talk Keys). Allow it. `AssociatedBundleIdentifiers` does not rename it.
 
 <br />
 
@@ -167,7 +174,7 @@ Runtime:
 | Log | `/tmp/talk-keys.log` |
 | Legacy symlink | `~/.cache/talk-keys` → app binary |
 
-Launchd runs `/usr/bin/open -W -n -g -a Talk Keys.app` so the process inherits the **app’s** TCC identity. Pointing launchd at the Mach-O inside `Contents/MacOS` often yields `AX=false`.
+Launchd runs `/usr/bin/open -W -n -g -a Talk Keys.app` so the process inherits the **app’s** TCC identity. Pointing launchd at the Mach-O inside `Contents/MacOS` often yields `AX=false`. That is also why Background Items shows **open**.
 
 <br />
 
@@ -205,8 +212,8 @@ right-command hold → dictate stop
 
 | Line | Meaning |
 |---|---|
-| `AX=false` / `ListenEvent=false` | Grant missing; tap will not see keys |
-| `tap not created` | Accessibility off |
+| `AX=false` / `ListenEvent=false` | Grant missing, or grants not yet picked up (restart) |
+| `tap not created` | Accessibility off; Input Monitoring is a separate pane |
 | `empty` | Nothing selected and clipboard empty |
 | `right-option chord (ignored)` | You held Option and pressed another key |
 | `stop` | Second tap killed `say` |
@@ -215,9 +222,10 @@ right-command hold → dictate stop
 
 ## 🔧 Troubleshooting
 
-**Tap does nothing in Warp or Grok**
+**Tap does nothing (including Warp / Grok)**
 - `talk-keys status` must show `AX=true ListenEvent=true` **and** `Right Option tap + Right Command hold armed`
-- Toggle Talk Keys in Accessibility **and** Input Monitoring, then `talk-keys restart` (not `install`)
+- Need **both** Accessibility and Input Monitoring. One pane is not enough.
+- Toggle Talk Keys off/on in both panes, then `talk-keys restart` (not `install`)
 - Drag-select in Warp (`copy_on_select`); a keyboard caret is not a selection
 
 **It worked, then died after I pulled**
@@ -226,8 +234,9 @@ right-command hold → dictate stop
 **Option+S / accents broke**
 - Only a **bare** Right Option tap speaks. Left Option is untouched. Warp still maps Left Option to Alt.
 
-**Login Items blocked it**
-- System Settings → General → Login Items → allow Talk Keys
+**Login Items shows open / I denied it**
+- That item **is** Talk Keys. Re-enable **open** under Allow in the Background, then `talk-keys restart`
+- It will not start at the next login until that toggle is on
 
 **Duplicate processes**
 - `talk-keys restart` unloads the agent and `pkill -x talk-keys`
@@ -237,7 +246,7 @@ right-command hold → dictate stop
 ## 🔗 Related
 
 - **[Snap Cat](https://github.com/stevederico/snapcat)** — sibling macOS utility; mascot **Snapu**
-- This repo is standalone. `./scripts/talk-keys install` is enough. A local dotfiles tree may also link the CLI.
+- This repo is standalone. `./scripts/talk-keys install` is enough. Symlink `scripts/talk-keys` onto PATH for the CLI.
 
 <br />
 
