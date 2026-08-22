@@ -1,3 +1,7 @@
+0.24.0
+
+  Add AGENTS.md
+
 0.23.0
 
   Copy selection from front app
