@@ -37,6 +37,30 @@ func clipboardString() -> String {
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+/// Address-bar / Chrome-no-selection copy, or a full AX dump of the window.
+func isJunkSpeak(_ s: String) -> Bool {
+    if s.isEmpty { return true }
+    if s.count > 4000 { return true }
+    if s.contains(where: \.isWhitespace) { return false }
+    return s.hasPrefix("http://") || s.hasPrefix("https://")
+}
+
+func isTerminalFront() -> Bool {
+    switch NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
+    case "com.mitchellh.ghostty",
+         "dev.warp.Warp-Stable",
+         "dev.warp.Warp",
+         "com.googlecode.iterm2",
+         "com.apple.Terminal",
+         "net.kovidgoyal.kitty",
+         "com.github.wez.wezterm",
+         "org.alacritty":
+        return true
+    default:
+        return false
+    }
+}
+
 func axSelectedText() -> String? {
     guard let app = NSWorkspace.shared.frontmostApplication,
           app.processIdentifier != pid_t(getpid()) else { return nil }
@@ -50,8 +74,17 @@ func axSelectedText() -> String? {
     var selected: CFTypeRef?
     guard AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &selected) == .success
     else { return nil }
-    let s = (selected as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-    return (s?.isEmpty == false) ? s : nil
+    let s = (selected as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if s.isEmpty { return nil }
+    var value: CFTypeRef?
+    if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
+       let v = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+       v == s, s.count > 80
+    {
+        return nil
+    }
+    if isJunkSpeak(s) { return nil }
+    return s
 }
 
 func pressCopy() {
@@ -256,6 +289,12 @@ func scheduleDictateHold() {
     DispatchQueue.main.asyncAfter(deadline: .now() + holdToDictate, execute: work)
 }
 
+func speakNow(_ text: String, via: String) {
+    let preview = text.prefix(60).replacingOccurrences(of: "\n", with: " ")
+    fputs("speak \(via) \(text.count) chars «\(preview)»\n", stderr)
+    speak(text)
+}
+
 func handleHotKey() {
     if sayRunning() {
         let p = Process()
@@ -266,23 +305,40 @@ func handleHotKey() {
         fputs("stop\n", stderr)
         return
     }
-    if let ax = axSelectedText() {
-        fputs("speak AX \(ax.count) chars\n", stderr)
-        speak(ax)
+    let before = clipboardString()
+    let ax = axSelectedText()
+    // Grok/Warp already copied. Cmd+C here overwrites with the page URL or nothing.
+    if isTerminalFront() {
+        if !isJunkSpeak(before) {
+            speakNow(before, via: "clip")
+            return
+        }
+        if let ax {
+            speakNow(ax, via: "AX")
+            return
+        }
+        fputs("empty\n", stderr)
         return
     }
-    let before = clipboardString()
+    if let ax {
+        speakNow(ax, via: "AX")
+        return
+    }
     if AXIsProcessTrusted() {
         pressCopy()
         Thread.sleep(forTimeInterval: 0.25)
     }
     let after = clipboardString()
-    guard !after.isEmpty else {
-        fputs("empty\n", stderr)
+    if !isJunkSpeak(after) {
+        let via = after == before ? "clip" : "copied"
+        speakNow(after, via: via)
         return
     }
-    fputs("speak \(after.count) chars clip=\(after == before ? "same" : "copied") pid=\(targetPid() ?? 0)\n", stderr)
-    speak(after)
+    if !isJunkSpeak(before) {
+        speakNow(before, via: "clip")
+        return
+    }
+    fputs("empty\n", stderr)
 }
 
 private func eventTapCallback(

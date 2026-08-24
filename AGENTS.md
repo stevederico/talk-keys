@@ -34,7 +34,7 @@ tail -f /tmp/talk-keys.log
 - **Background Items shows `open`, not Talk Keys.** That item is this agent. Deny it and login start dies. Re-enable: System Settings → General → Login Items & Extensions → Allow in the Background → **open**. `AssociatedBundleIdentifiers` does not rename it.
 - Need **both** Accessibility and Input Monitoring. AX off → `tap not created`. ListenEvent off → tap exists, no Right Option. After toggling, `talk-keys restart`. The live process keeps `AX=false ListenEvent=false` until relaunch. `status` must show both true **and** `armed`.
 - Never write the live plist through a **symlink** into this repo (bakes `$HOME` into git). `write_plist` deletes a dest symlink first. Sample path stays `/Users/you/…`.
-- **Speak:** AX selected text, then `Cmd+C` **to the front app pid**, then clipboard. Global HID copy misses Warp.
+- **Speak:** AX selected text (skip URL-only / full-control dumps), then clipboard. In terminals (Ghostty, Warp, …) **never `Cmd+C`** — Grok’s Copied toast already wrote the pasteboard; a synthetic copy clobbers it with `https://x.com` or empty. `Cmd+C` only for non-terminals, still to the front app pid.
 - **Dictate:** Speech framework (mic + speech TCC), stream by **pasting** `Cmd+V` to the front pid. HID unicode / system Dictation do not reach PTYs. Swallow Right Command while dictating or injected keys become Cmd+chords.
 - Modifier-alone = `CGEventTap` `.defaultTap` (not Carbon hotkeys, not `listenOnly`).
 - Do not add Karabiner, crates, or npm. Do not claim `~/.dotfiles/setup.sh` links the CLI unless it actually does.

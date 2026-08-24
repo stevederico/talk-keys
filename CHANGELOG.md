@@ -1,3 +1,9 @@
+0.26.0
+
+  Keep grok copies
+  Skip URL bar
+  Skip screen dumps
+
 0.25.0
 
   Document open item

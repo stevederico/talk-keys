@@ -72,8 +72,8 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 Right Option is a modifier. Carbon `RegisterEventHotKey` cannot bind a modifier alone, so Talk Keys installs a session `CGEventTap`.
 
 1. **flagsChanged** on keycode `61` (`kVK_RightOption`): press starts an “alone” wait; any other keyDown while held cancels it.
-2. **Release with no other key** copies the front app selection (`Cmd+C` via Accessibility) if needed, then reads the pasteboard.
-3. **`/usr/bin/say`** speaks that text. A second Right Option tap runs `pkill -x say`.
+2. **Release with no other key** reads AX selected text, then the pasteboard. In a browser it may post `Cmd+C` to the front app. In Ghostty / Warp / other terminals it does **not** copy — Grok’s Copied toast already filled the pasteboard, and a synthetic `Cmd+C` overwrites it with the page URL.
+3. **`/usr/bin/say`** speaks that text. A second Right Option tap runs `pkill -x say`. URL-only strings and full-window AX dumps are skipped.
 4. **Right Command** (`54`) hold ~200ms starts Speech recognition. New words are pasted into the front app (Warp PTY), not typed as HID unicode.
 
 `listenOnly` taps can “succeed” with no events when TCC is missing. Talk Keys uses **`.defaultTap`** (returns nil without Accessibility) and keeps Option+key passthrough.
@@ -205,7 +205,7 @@ talk-keys permissions AX=true ListenEvent=true
 talk-keys: Right Option tap + Right Command hold armed
 right-option down
 right-option alone → speak
-speak 128 chars
+speak clip 128 chars «hello from grok»
 right-command hold → dictate start
 right-command hold → dictate stop
 ```
@@ -214,7 +214,7 @@ right-command hold → dictate stop
 |---|---|
 | `AX=false` / `ListenEvent=false` | Grant missing, or grants not yet picked up (restart) |
 | `tap not created` | Accessibility off; Input Monitoring is a separate pane |
-| `empty` | Nothing selected and clipboard empty |
+| `empty` | Nothing selected, clipboard empty, or only a URL / full-window dump |
 | `right-option chord (ignored)` | You held Option and pressed another key |
 | `stop` | Second tap killed `say` |
 
@@ -222,11 +222,16 @@ right-command hold → dictate stop
 
 ## 🔧 Troubleshooting
 
+**It says https://x.com / reads the screen**
+- Grok in-app copy already put the text on the pasteboard. An old Talk Keys then sent `Cmd+C` and Chrome/Brave with no native selection copied the page URL.
+- 0.26.0 skips URL-only and full-window AX dumps, and never `Cmd+C` in terminals. Rebuild, re-grant both TCC panes, `talk-keys restart`.
+
 **Tap does nothing (including Warp / Grok)**
 - `talk-keys status` must show `AX=true ListenEvent=true` **and** `Right Option tap + Right Command hold armed`
 - Need **both** Accessibility and Input Monitoring. One pane is not enough.
 - Toggle Talk Keys off/on in both panes, then `talk-keys restart` (not `install`)
 - Drag-select in Warp (`copy_on_select`); a keyboard caret is not a selection
+- In Grok: copy first (toast Copied), then tap Right Option. Shift-drag is the terminal’s native copy.
 
 **It worked, then died after I pulled**
 - `install` rebuilt the binary and TCC dropped. Re-grant both panes, `talk-keys restart`
