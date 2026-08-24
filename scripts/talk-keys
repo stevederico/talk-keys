@@ -35,8 +35,8 @@ build() {
 }
 
 write_plist() {
-  # Launch via `open -W -a` so the process inherits Talk Keys.app TCC grants.
-  # Running Contents/MacOS/talk-keys directly from launchd often gets AX=false.
+  # Launch via `open -W -n -a` so TCC attaches to Talk Keys.app (not the Mach-O).
+  # Do not pass -g (background): AX/ListenEvent prompts never appear and grants stay false.
   mkdir -p "$HOME/Library/LaunchAgents"
   # Never write through a symlink into the repo sample (that baked $HOME into git).
   if [ -L "$PLIST_DEST" ]; then
@@ -58,7 +58,6 @@ write_plist() {
 		<string>/usr/bin/open</string>
 		<string>-W</string>
 		<string>-n</string>
-		<string>-g</string>
 		<string>-a</string>
 		<string>${APP}</string>
 		<string>-o</string>

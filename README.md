@@ -174,7 +174,7 @@ Runtime:
 | Log | `/tmp/talk-keys.log` |
 | Legacy symlink | `~/.cache/talk-keys` → app binary |
 
-Launchd runs `/usr/bin/open -W -n -g -a Talk Keys.app` so the process inherits the **app’s** TCC identity. Pointing launchd at the Mach-O inside `Contents/MacOS` often yields `AX=false`. That is also why Background Items shows **open**.
+Launchd runs `/usr/bin/open -W -n -a Talk Keys.app` so the process inherits the **app’s** TCC identity. Pointing launchd at the Mach-O inside `Contents/MacOS` often yields `AX=false`. That is also why Background Items shows **open**. Do not pass `-g` or the TCC prompt stays hidden.
 
 <br />
 
@@ -232,6 +232,9 @@ right-command hold → dictate stop
 - Toggle Talk Keys off/on in both panes, then `talk-keys restart` (not `install`)
 - Drag-select in Warp (`copy_on_select`); a keyboard caret is not a selection
 - In Grok: copy first (toast Copied), then tap Right Option. Shift-drag is the terminal’s native copy.
+
+**Tap does nothing after install (AX=false)**
+- The permission alert used to block the main thread and stay hidden (`open -g`). 0.27.0 opens both panes and polls. Toggle Talk Keys **off then on** in Accessibility **and** Input Monitoring, then `talk-keys restart`.
 
 **It worked, then died after I pulled**
 - `install` rebuilt the binary and TCC dropped. Re-grant both panes, `talk-keys restart`

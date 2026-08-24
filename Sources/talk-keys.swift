@@ -445,44 +445,45 @@ func createTap() -> CFMachPort? {
     )
 }
 
+func log(_ s: String) {
+    fputs(s + "\n", stderr)
+    fflush(stderr)
+}
+
 func armTap() {
     if let existing = eventTap {
         CGEvent.tapEnable(tap: existing, enable: true)
         return
     }
     guard let tap = createTap() else {
-        fputs("talk-keys: tap not created (need Accessibility)\n", stderr)
+        log("talk-keys: tap not created (need Accessibility)")
         return
     }
     eventTap = tap
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    fputs("talk-keys: Right Option tap + Right Command hold armed\n", stderr)
+    log("talk-keys: Right Option tap + Right Command hold armed")
+}
+
+func permissionState() -> (ax: Bool, listen: Bool) {
+    (AXIsProcessTrusted(), CGPreflightListenEventAccess())
 }
 
 func promptIfNeeded() {
-    let ax = AXIsProcessTrusted()
-    let listen = CGPreflightListenEventAccess()
-    fputs("talk-keys permissions AX=\(ax) ListenEvent=\(listen)\n", stderr)
-    if ax && listen {
+    let p = permissionState()
+    log("talk-keys permissions AX=\(p.ax) ListenEvent=\(p.listen)")
+    if p.ax && p.listen {
         armTap()
         return
     }
-    NSApp.setActivationPolicy(.regular)
-    NSApp.activate()
-    let alert = NSAlert()
-    alert.messageText = "Talk Keys Needs Permission"
-    alert.informativeText = "Turn on Talk Keys in Accessibility and Input Monitoring, then click OK."
-    alert.addButton(withTitle: "Open Settings")
-    _ = alert.runModal()
+    // Do not runModal: that blocked the retry timer, and open -g hid the alert.
     openPrivacyPane("Privacy_Accessibility")
     openPrivacyPane("Privacy_ListenEvent")
     _ = CGRequestListenEventAccess()
     _ = AXIsProcessTrustedWithOptions(
         [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     )
-    NSApp.setActivationPolicy(.accessory)
     armTap()
 }
 
@@ -491,10 +492,18 @@ app.setActivationPolicy(.accessory)
 DispatchQueue.main.async {
     promptIfNeeded()
     if eventTap == nil {
+        var last = ""
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { t in
-            if AXIsProcessTrusted() && CGPreflightListenEventAccess() {
+            let p = permissionState()
+            if p.ax && p.listen {
                 armTap()
                 if eventTap != nil { t.invalidate() }
+                return
+            }
+            let line = "AX=\(p.ax) ListenEvent=\(p.listen)"
+            if line != last {
+                log("talk-keys waiting \(line) — toggle Talk Keys off/on in both panes")
+                last = line
             }
         }
     }

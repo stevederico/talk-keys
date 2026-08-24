@@ -1,3 +1,9 @@
+0.27.0
+
+  Unblock permission wait
+  Poll until granted
+  Drop hidden -g
+
 0.26.0
 
   Keep grok copies

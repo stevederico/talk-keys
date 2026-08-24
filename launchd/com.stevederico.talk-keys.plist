@@ -14,7 +14,6 @@
 		<string>/usr/bin/open</string>
 		<string>-W</string>
 		<string>-n</string>
-		<string>-g</string>
 		<string>-a</string>
 		<string>/Users/you/Applications/Talk Keys.app</string>
 		<string>-o</string>
