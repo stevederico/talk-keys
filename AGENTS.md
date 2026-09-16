@@ -33,6 +33,7 @@ tail -f /tmp/talk-keys.log
 - Launchd runs `/usr/bin/open -W -n -a Talk Keys.app` so TCC attaches to the **app**. Direct `Contents/MacOS/talk-keys` often starts with `AX=false` (tap armed, no keys). Do not pass `-g` (hides the TCC prompt).
 - **Background Items shows `open`, not Talk Keys.** That item is this agent. Deny it and login start dies. Re-enable: System Settings → General → Login Items & Extensions → Allow in the Background → **open**. `AssociatedBundleIdentifiers` does not rename it.
 - Need **both** Accessibility and Input Monitoring. AX off → `tap not created`. ListenEvent off → tap exists, no hotkeys. After toggling, `talk-keys restart`. The live process keeps `AX=false` until relaunch. `status` must show both true **and** `armed`.
+- **KeepAlive is off.** Menubar Quit stays quit until login or `talk-keys start` / `restart`. Do not turn KeepAlive back on.
 - Never `NSAlert.runModal` for TCC: it blocked the retry timer, and launchd `open -g` hid the alert so grants never attached.
 - Adhoc sign only (`codesign -s -`). Recompile drops both TCC panes.
 - Never write the live plist through a **symlink** into this repo (bakes `$HOME` into git). `write_plist` deletes a dest symlink first. Sample path stays `/Users/you/…`.

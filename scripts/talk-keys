@@ -70,7 +70,7 @@ write_plist() {
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<true/>
+	<false/>
 	<key>StandardOutPath</key>
 	<string>${LOG}</string>
 	<key>StandardErrorPath</key>

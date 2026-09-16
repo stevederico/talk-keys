@@ -187,7 +187,7 @@ Launchd runs `/usr/bin/open -W -n -a Talk Keys.app` so the process inherits the 
 | **AppKit** | system | Accessory app, permission alert |
 | **ApplicationServices** | system | Event tap, Accessibility, ListenEvent |
 | **say** | `/usr/bin/say` | Speech |
-| **launchd** | macOS 13+ | Login + KeepAlive |
+| **launchd** | macOS 13+ | Login start (no KeepAlive — Quit stays quit) |
 
 No Package.swift. No CocoaPods. No Homebrew.
 

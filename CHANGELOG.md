@@ -1,3 +1,12 @@
+0.31.0
+
+  Disable KeepAlive relaunch
+  Restore Control L/R speak
+
+0.30.0
+
+  Speak Right Control only
+
 0.29.0
 
   Add menubar key picker
