@@ -1,5 +1,5 @@
 // talk-keys — Menubar: pick speak (tap) + dictate (hold) modifiers.
-// Defaults: Right Control tap speaks; Right Command hold dictates.
+// Defaults: Control tap speaks; Right Command hold dictates.
 // Dictation uses Speech, then pastes into the focused app (incl. Warp/Grok PTYs).
 import AppKit
 import ApplicationServices
@@ -72,8 +72,7 @@ enum HotKeyConfig {
 
     static func isSpeakKey(_ code: Int64) -> Bool {
         if speakExact { return code == speakKeyCode }
-        // Default: Right Control only — Left ⌃ stays for app shortcuts.
-        return code == rightControlKeyCode
+        return code == leftControlKeyCode || code == rightControlKeyCode
     }
 
     static func isDictateKey(_ code: Int64) -> Bool {
@@ -95,7 +94,7 @@ enum HotKeyConfig {
     }
 
     static func speakLabel() -> String {
-        if !speakExact { return "Right ⌃" }
+        if !speakExact { return "⌃ (L/R)" }
         return displayName(for: speakKeyCode)
     }
 
