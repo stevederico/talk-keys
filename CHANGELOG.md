@@ -1,3 +1,7 @@
+0.30.0
+
+  Speak Right Control only
+
 0.29.0
 
   Add menubar key picker

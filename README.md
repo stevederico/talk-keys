@@ -32,7 +32,7 @@ talk-keys restart
 
 macOS will ask to allow a Background Item named **open**. That **is** Talk Keys (launchd runs `/usr/bin/open` so TCC sticks to the app). Allow it. Deny it and Talk Keys will not start at login.
 
-Look for the **ear** icon in the menu bar. Defaults: tap **Control** (left or right) to speak; hold **Right Command** to dictate. Use **Set Speak Key…** / **Set Dictate Key…** if your board has no Option (e.g. `space · ⌘ · fn · ctrl`).
+Look for the **ear** icon in the menu bar. Defaults: tap **Right Control** to speak; hold **Right Command** to dictate. Left Control is untouched. Use **Set Speak Key…** / **Set Dictate Key…** to rebind.
 
 Allow **Microphone** and **Speech Recognition** when prompted. Hold types into Warp, Grok, and other PTYs (system Dictation only fills AppKit text views).
 
@@ -41,7 +41,7 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 ## ✨ What's Included
 
 ### 🗣️ **Speak on a modifier tap**
-- **Control alone** (left or right by default) speaks the current highlight (or the clipboard)
+- **Right Control alone** (default) speaks the current highlight (or the clipboard)
 - Rebind any modifier from the menubar (**Set Speak Key…**)
 - **Second tap** stops `say`
 - Modifier+key chords are ignored for speak
@@ -130,7 +130,7 @@ On first launch with either grant missing, Talk Keys shows **Talk Keys Needs Per
 
 ```
 talk-keys permissions AX=true ListenEvent=true
-talk-keys: speak=⌃ (L/R) dictate=Right ⌘ armed
+talk-keys: speak=Right ⌃ dictate=Right ⌘ armed
 ```
 
 Recompile / re-sign changes the app CDHash and **drops both grants**. `talk-keys restart` does not rebuild on purpose. After a real `install` rebuild, toggle Talk Keys off/on in both panes, then `talk-keys restart`.
@@ -203,7 +203,7 @@ Healthy tap:
 
 ```
 talk-keys permissions AX=true ListenEvent=true
-talk-keys: speak=⌃ (L/R) dictate=Right ⌘ armed
+talk-keys: speak=Right ⌃ dictate=Right ⌘ armed
 right-option down
 right-option alone → speak
 speak clip 128 chars «hello from grok»
@@ -242,7 +242,7 @@ right-command hold → dictate stop
 - `install` rebuilt the binary and TCC dropped. Re-grant both panes, `talk-keys restart`
 
 **Option+S / accents broke**
-- Only a **bare** speak-key tap speaks. Defaults are Control (no Option required). Boards like `space · ⌘ · fn · ctrl` use **Right ⌃** for speak and **Right ⌘** hold for dictate.
+- Only a **bare** speak-key tap speaks. Default is **Right ⌃** (Left ⌃ stays for shortcuts). Boards like `space · ⌘ · fn · ctrl` use that right Ctrl + **Right ⌘** hold for dictate.
 
 **Login Items shows open / I denied it**
 - That item **is** Talk Keys. Re-enable **open** under Allow in the Background, then `talk-keys restart`
