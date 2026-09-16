@@ -1,3 +1,9 @@
+0.28.0
+
+  Speak on either Option
+  Flush key logs
+  Fix empty dictate
+
 0.27.0
 
   Unblock permission wait

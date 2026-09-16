@@ -22,17 +22,17 @@ Turn on **Talk Keys** in **both** panes (not optional):
 1. System Settings → Privacy & Security → **Accessibility**
 2. System Settings → Privacy & Security → **Input Monitoring**
 
-Accessibility off → `tap not created`. Input Monitoring off → the tap never sees Right Option. If the toggles were already on from an older build, turn them **off then on**. Then:
+Accessibility off → `tap not created`. Input Monitoring off → the tap never sees Option. If the toggles were already on from an older build, turn them **off then on**. Then:
 
 ```bash
 talk-keys restart
 ```
 
-`talk-keys status` must show `AX=true ListenEvent=true` and `Right Option tap + Right Command hold armed`. Toggles do not attach to the already-running process until restart.
+`talk-keys status` must show `AX=true ListenEvent=true` and `Option tap (L/R) + Right Command hold armed`. Toggles do not attach to the already-running process until restart.
 
 macOS will ask to allow a Background Item named **open**. That **is** Talk Keys (launchd runs `/usr/bin/open` so TCC sticks to the app). Allow it. Deny it and Talk Keys will not start at login.
 
-Select text. Tap **Right Option** to hear it. Hold **Right Command** to dictate into the focused field.
+Select text. Tap **Option** (left or right) to hear it. Hold **Right Command** to dictate into the focused field.
 
 Allow **Microphone** and **Speech Recognition** when prompted. Hold types into Warp, Grok, and other PTYs (system Dictation only fills AppKit text views).
 
@@ -41,7 +41,7 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 ## ✨ What's Included
 
 ### 🗣️ **Speak on a modifier tap**
-- **Right Option alone** speaks the current highlight (or the clipboard)
+- **Option alone** (left or right) speaks the current highlight (or the clipboard)
 - **Second tap** stops `say`
 - **Option+key chords** still work (accents, Warp Alt on Left Option, menus)
 
@@ -240,7 +240,7 @@ right-command hold → dictate stop
 - `install` rebuilt the binary and TCC dropped. Re-grant both panes, `talk-keys restart`
 
 **Option+S / accents broke**
-- Only a **bare** Right Option tap speaks. Left Option is untouched. Warp still maps Left Option to Alt.
+- Only a **bare** Option tap speaks. Option+key chords are ignored. Boards with no Right ⌥ (e.g. `space · ⌘ · fn · ctrl`) use **Left Option**.
 
 **Login Items shows open / I denied it**
 - That item **is** Talk Keys. Re-enable **open** under Allow in the Background, then `talk-keys restart`

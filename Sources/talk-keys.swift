@@ -1,6 +1,6 @@
-// talk-keys — Right Option tap speaks the highlight. Right Command hold dictates.
-// Dictation uses Speech (on-device when it can), then types into the focused app
-// (Warp/Grok PTYs ignore macOS Dictation’s NSText insert).
+// talk-keys — Option tap (left or right) speaks the highlight.
+// Right Command hold dictates. Dictation uses Speech (on-device when it can),
+// then pastes into the focused app (Warp/Grok PTYs ignore macOS Dictation).
 import AppKit
 import ApplicationServices
 import AVFoundation
@@ -9,12 +9,13 @@ import Foundation
 import Speech
 
 private let rightOptionKeyCode: Int64 = 61 // kVK_RightOption
+private let leftOptionKeyCode: Int64 = 58 // kVK_Option
 private let rightCommandKeyCode: Int64 = 54 // kVK_RightCommand
 private let holdToDictate: TimeInterval = 0.2
 private let myPid = Int64(getpid())
 
-private var rightOptionDown = false
-private var rightOptionAlone = false
+private var optionDown = false
+private var optionAlone = false
 private var rightCommandDown = false
 private var rightCommandAlone = false
 private var isDictating = false
@@ -174,7 +175,7 @@ func streamDictate(_ next: String, typed: inout String) {
     let suffix = String(next.dropFirst(prefix))
     if !suffix.isEmpty {
         let pid = targetPid() ?? 0
-        fputs("dictate +\(suffix) pid=\(pid)\n", stderr)
+        log("dictate +\(suffix) pid=\(pid)")
         pasteToFront(suffix)
     }
     typed = next
@@ -190,39 +191,47 @@ final class DictateEngine {
     private var lastText = ""
     private var typed = ""
     private var live = false
+    /// Bumps on stop so late mic/speech callbacks never start after release.
+    private var epoch: UInt64 = 0
 
     func start() {
         lastText = ""
         typed = ""
         live = false
+        let startEpoch = epoch
         AVCaptureDevice.requestAccess(for: .audio) { mic in
             guard mic else {
-                fputs("dictate: microphone denied\n", stderr)
+                log("dictate: microphone denied — enable Talk Keys in Privacy → Microphone")
                 return
             }
             SFSpeechRecognizer.requestAuthorization { status in
                 DispatchQueue.main.async {
+                    guard self.epoch == startEpoch else { return }
                     guard status == .authorized, let recognizer = self.recognizer, recognizer.isAvailable else {
-                        fputs("dictate: speech not authorized (\(status.rawValue))\n", stderr)
+                        log("dictate: speech not authorized (\(status.rawValue))")
                         return
                     }
-                    self.begin(recognizer)
+                    self.begin(recognizer, startEpoch: startEpoch)
                 }
             }
         }
     }
 
-    private func begin(_ recognizer: SFSpeechRecognizer) {
+    private func begin(_ recognizer: SFSpeechRecognizer, startEpoch: UInt64) {
+        guard epoch == startEpoch else { return }
         task?.cancel()
         task = nil
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        // Prefer on-device when available, but do not require it — BT mics often
+        // return empty transcripts when requiresOnDeviceRecognition is forced.
         self.request = request
         let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            log("dictate: bad input format rate=\(format.sampleRate) ch=\(format.channelCount)")
+            return
+        }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             request.append(buffer)
@@ -231,11 +240,16 @@ final class DictateEngine {
             audioEngine.prepare()
             try audioEngine.start()
         } catch {
-            fputs("dictate: audio \(error.localizedDescription)\n", stderr)
+            log("dictate: audio \(error.localizedDescription)")
+            return
+        }
+        guard epoch == startEpoch else {
+            audioEngine.stop()
+            input.removeTap(onBus: 0)
             return
         }
         live = true
-        fputs("right-command hold → dictate start (stream)\n", stderr)
+        log("right-command hold → dictate start (stream) \(Int(format.sampleRate))Hz")
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             DispatchQueue.main.async {
                 guard let self, self.live else { return }
@@ -245,22 +259,25 @@ final class DictateEngine {
                     streamDictate(next, typed: &self.typed)
                 }
                 if let error {
-                    fputs("dictate: \(error.localizedDescription)\n", stderr)
+                    log("dictate: \(error.localizedDescription)")
                 }
             }
         }
     }
 
     func stop() {
+        epoch &+= 1
         live = false
-        audioEngine.stop()
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
         request = nil
-        task?.cancel()
+        task?.finish()
         task = nil
         streamDictate(lastText, typed: &typed)
-        fputs("right-command hold → dictate stop «\(typed)»\n", stderr)
+        log("right-command hold → dictate stop «\(typed)»")
         lastText = ""
         typed = ""
     }
@@ -291,7 +308,7 @@ func scheduleDictateHold() {
 
 func speakNow(_ text: String, via: String) {
     let preview = text.prefix(60).replacingOccurrences(of: "\n", with: " ")
-    fputs("speak \(via) \(text.count) chars «\(preview)»\n", stderr)
+    log("speak \(via) \(text.count) chars «\(preview)»")
     speak(text)
 }
 
@@ -302,7 +319,7 @@ func handleHotKey() {
         p.arguments = ["-x", "say"]
         try? p.run()
         p.waitUntilExit()
-        fputs("stop\n", stderr)
+        log("stop")
         return
     }
     let before = clipboardString()
@@ -317,7 +334,7 @@ func handleHotKey() {
             speakNow(ax, via: "AX")
             return
         }
-        fputs("empty\n", stderr)
+        log("empty")
         return
     }
     if let ax {
@@ -338,7 +355,7 @@ func handleHotKey() {
         speakNow(before, via: "clip")
         return
     }
-    fputs("empty\n", stderr)
+    log("empty")
 }
 
 private func eventTapCallback(
@@ -348,7 +365,7 @@ private func eventTapCallback(
     refcon: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        fputs("talk-keys tap re-enabled\n", stderr)
+        log("talk-keys tap re-enabled")
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
@@ -362,22 +379,29 @@ private func eventTapCallback(
 
     let keycode = event.getIntegerValueField(.keyboardEventKeycode)
 
-    if type == .flagsChanged && keycode == rightOptionKeyCode {
-        // Distinguish press vs release via Alternate flag for this key.
-        let optionDown = event.flags.contains(.maskAlternate)
-        if optionDown && !rightOptionDown {
-            rightOptionDown = true
-            rightOptionAlone = true
-            fputs("right-option down\n", stderr)
-        } else if !optionDown && rightOptionDown {
-            rightOptionDown = false
-            if rightOptionAlone {
-                fputs("right-option alone → speak\n", stderr)
+    // Left Command only (right Command is dictate).
+    if type == .flagsChanged && keycode == 55 {
+        if event.flags.contains(.maskCommand) { log("left-command (ignored — use Right Command)") }
+        return Unmanaged.passUnretained(event)
+    }
+
+    // Either Option — some boards have no Right ⌥ (space · ⌘ · fn · ctrl).
+    if type == .flagsChanged && (keycode == rightOptionKeyCode || keycode == leftOptionKeyCode) {
+        let side = keycode == rightOptionKeyCode ? "right" : "left"
+        let down = event.flags.contains(.maskAlternate)
+        if down && !optionDown {
+            optionDown = true
+            optionAlone = true
+            log("\(side)-option down")
+        } else if !down && optionDown {
+            optionDown = false
+            if optionAlone {
+                log("\(side)-option alone → speak")
                 DispatchQueue.main.async { handleHotKey() }
             } else {
-                fputs("right-option chord (ignored)\n", stderr)
+                log("\(side)-option chord (ignored)")
             }
-            rightOptionAlone = false
+            optionAlone = false
         }
         return Unmanaged.passUnretained(event)
     }
@@ -386,6 +410,7 @@ private func eventTapCallback(
         if !rightCommandDown {
             rightCommandDown = true
             rightCommandAlone = true
+            log("right-command down")
             DispatchQueue.main.async { scheduleDictateHold() }
             return nil
         }
@@ -405,8 +430,8 @@ private func eventTapCallback(
     }
 
     if type == .keyDown {
-        if rightOptionDown {
-            rightOptionAlone = false
+        if optionDown {
+            optionAlone = false
         }
         if rightCommandDown && !isDictating {
             rightCommandAlone = false
@@ -463,7 +488,7 @@ func armTap() {
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    log("talk-keys: Right Option tap + Right Command hold armed")
+    log("talk-keys: Option tap (L/R) + Right Command hold armed")
 }
 
 func permissionState() -> (ax: Bool, listen: Bool) {

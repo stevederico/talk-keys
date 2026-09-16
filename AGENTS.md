@@ -1,6 +1,6 @@
 # AGENTS.md
 
-macOS LaunchAgent. **Right Option tap** speaks the selection. **Right Command hold** dictates into the focused app (including Warp / Grok PTYs).
+macOS LaunchAgent. **Option tap** (left or right) speaks the selection. **Right Command hold** dictates into the focused app (including Warp / Grok PTYs).
 
 Pure Swift. Apple frameworks only. No Karabiner. No SPM. No Homebrew.
 
@@ -32,7 +32,7 @@ tail -f /tmp/talk-keys.log
 
 - Launchd runs `/usr/bin/open -W -n -a Talk Keys.app` so TCC attaches to the **app**. Direct `Contents/MacOS/talk-keys` often starts with `AX=false` (tap armed, no keys). Do not pass `-g` (hides the TCC prompt).
 - **Background Items shows `open`, not Talk Keys.** That item is this agent. Deny it and login start dies. Re-enable: System Settings → General → Login Items & Extensions → Allow in the Background → **open**. `AssociatedBundleIdentifiers` does not rename it.
-- Need **both** Accessibility and Input Monitoring. AX off → `tap not created`. ListenEvent off → tap exists, no Right Option. After toggling, `talk-keys restart`. The live process keeps `AX=false` until relaunch. `status` must show both true **and** `armed`.
+- Need **both** Accessibility and Input Monitoring. AX off → `tap not created`. ListenEvent off → tap exists, no Option taps. After toggling, `talk-keys restart`. The live process keeps `AX=false` until relaunch. `status` must show both true **and** `armed`.
 - Never `NSAlert.runModal` for TCC: it blocked the retry timer, and launchd `open -g` hid the alert so grants never attached.
 - Adhoc sign only (`codesign -s -`). Recompile drops both TCC panes.
 - Never write the live plist through a **symlink** into this repo (bakes `$HOME` into git). `write_plist` deletes a dest symlink first. Sample path stays `/Users/you/…`.
