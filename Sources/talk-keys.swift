@@ -1,6 +1,6 @@
-// talk-keys — Option tap (left or right) speaks the highlight.
-// Right Command hold dictates. Dictation uses Speech (on-device when it can),
-// then pastes into the focused app (Warp/Grok PTYs ignore macOS Dictation).
+// talk-keys — Menubar: pick speak (tap) + dictate (hold) modifiers.
+// Defaults: Control tap speaks; Right Command hold dictates.
+// Dictation uses Speech, then pastes into the focused app (incl. Warp/Grok PTYs).
 import AppKit
 import ApplicationServices
 import AVFoundation
@@ -8,19 +8,301 @@ import Darwin
 import Foundation
 import Speech
 
-private let rightOptionKeyCode: Int64 = 61 // kVK_RightOption
-private let leftOptionKeyCode: Int64 = 58 // kVK_Option
-private let rightCommandKeyCode: Int64 = 54 // kVK_RightCommand
+private let leftControlKeyCode: Int64 = 59
+private let rightControlKeyCode: Int64 = 62
+private let leftOptionKeyCode: Int64 = 58
+private let rightOptionKeyCode: Int64 = 61
+private let leftCommandKeyCode: Int64 = 55
+private let rightCommandKeyCode: Int64 = 54
+private let fnKeyCode: Int64 = 63
+private let escapeKeyCode: Int64 = 53
 private let holdToDictate: TimeInterval = 0.2
+private let recordTimeout: TimeInterval = 5
 private let myPid = Int64(getpid())
 
-private var optionDown = false
-private var optionAlone = false
-private var rightCommandDown = false
-private var rightCommandAlone = false
+private var speakModDown = false
+private var speakModAlone = false
+private var dictateModDown = false
+private var dictateModAlone = false
 private var isDictating = false
 private var dictateHoldWork: DispatchWorkItem?
 private var eventTap: CFMachPort?
+private var recordTarget: RecordTarget = .none
+private var recordDeadline: Date?
+private var recordDownCode: Int64?
+
+enum RecordTarget {
+    case none
+    case speak
+    case dictate
+}
+
+enum HotKeyConfig {
+    private static let ud = UserDefaults.standard
+    private static let speakKey = "speakKeyCode"
+    private static let dictateKey = "dictateKeyCode"
+    /// false → match both Control keys until user picks one in the menubar.
+    private static let speakExactKey = "speakExact"
+    private static let dictateExactKey = "dictateExact"
+
+    static var speakKeyCode: Int64 {
+        get {
+            let v = ud.object(forKey: speakKey) as? Int ?? Int(rightControlKeyCode)
+            return Int64(v)
+        }
+        set {
+            ud.set(Int(newValue), forKey: speakKey)
+            ud.set(true, forKey: speakExactKey)
+        }
+    }
+
+    static var dictateKeyCode: Int64 {
+        get {
+            let v = ud.object(forKey: dictateKey) as? Int ?? Int(rightCommandKeyCode)
+            return Int64(v)
+        }
+        set {
+            ud.set(Int(newValue), forKey: dictateKey)
+            ud.set(true, forKey: dictateExactKey)
+        }
+    }
+
+    static var speakExact: Bool { ud.bool(forKey: speakExactKey) }
+    static var dictateExact: Bool { ud.bool(forKey: dictateExactKey) }
+
+    static func isSpeakKey(_ code: Int64) -> Bool {
+        if speakExact { return code == speakKeyCode }
+        return code == leftControlKeyCode || code == rightControlKeyCode
+    }
+
+    static func isDictateKey(_ code: Int64) -> Bool {
+        if dictateExact { return code == dictateKeyCode }
+        return code == rightCommandKeyCode
+    }
+
+    static func displayName(for code: Int64) -> String {
+        switch code {
+        case leftControlKeyCode: return "Left ⌃"
+        case rightControlKeyCode: return "Right ⌃"
+        case leftOptionKeyCode: return "Left ⌥"
+        case rightOptionKeyCode: return "Right ⌥"
+        case leftCommandKeyCode: return "Left ⌘"
+        case rightCommandKeyCode: return "Right ⌘"
+        case fnKeyCode: return "fn"
+        default: return "Key \(code)"
+        }
+    }
+
+    static func speakLabel() -> String {
+        if !speakExact { return "⌃ (L/R)" }
+        return displayName(for: speakKeyCode)
+    }
+
+    static func dictateLabel() -> String {
+        if !dictateExact { return "Right ⌘" }
+        return displayName(for: dictateKeyCode)
+    }
+
+    static func isBindableModifier(_ code: Int64) -> Bool {
+        switch code {
+        case leftControlKeyCode, rightControlKeyCode,
+             leftOptionKeyCode, rightOptionKeyCode,
+             leftCommandKeyCode, rightCommandKeyCode,
+             fnKeyCode:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func modifierMask(for code: Int64) -> CGEventFlags? {
+        switch code {
+        case leftControlKeyCode, rightControlKeyCode: return .maskControl
+        case leftOptionKeyCode, rightOptionKeyCode: return .maskAlternate
+        case leftCommandKeyCode, rightCommandKeyCode: return .maskCommand
+        case fnKeyCode: return .maskSecondaryFn
+        default: return nil
+        }
+    }
+
+    static func modifierIsDown(code: Int64, flags: CGEventFlags) -> Bool {
+        guard let mask = modifierMask(for: code) else { return false }
+        return flags.contains(mask)
+    }
+}
+
+final class StatusItemController: NSObject {
+    static let shared = StatusItemController()
+
+    private var statusItem: NSStatusItem?
+    private var statusMenuItem: NSMenuItem?
+    private var speakTitleItem: NSMenuItem?
+    private var dictateTitleItem: NSMenuItem?
+    private var recordTimeoutWork: DispatchWorkItem?
+
+    func install() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            if let img = NSImage(systemSymbolName: "ear", accessibilityDescription: "Talk Keys") {
+                img.isTemplate = true
+                button.image = img
+            } else {
+                button.title = "TK"
+            }
+            button.toolTip = "Talk Keys"
+        }
+        let menu = NSMenu()
+        let speakTitle = NSMenuItem(title: "Speak Key: \(HotKeyConfig.speakLabel())", action: nil, keyEquivalent: "")
+        speakTitle.isEnabled = false
+        menu.addItem(speakTitle)
+        speakTitleItem = speakTitle
+
+        let dictateTitle = NSMenuItem(title: "Dictate Key: \(HotKeyConfig.dictateLabel())", action: nil, keyEquivalent: "")
+        dictateTitle.isEnabled = false
+        menu.addItem(dictateTitle)
+        dictateTitleItem = dictateTitle
+
+        menu.addItem(NSMenuItem(
+            title: "Set Speak Key…",
+            action: #selector(setSpeakKey),
+            keyEquivalent: ""
+        ))
+        menu.addItem(NSMenuItem(
+            title: "Set Dictate Key…",
+            action: #selector(setDictateKey),
+            keyEquivalent: ""
+        ))
+        menu.addItem(.separator())
+
+        let status = NSMenuItem(title: statusText(), action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        menu.addItem(status)
+        statusMenuItem = status
+
+        menu.addItem(NSMenuItem(
+            title: "Open Accessibility Settings",
+            action: #selector(openAccessibility),
+            keyEquivalent: ""
+        ))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(
+            title: "Quit Talk Keys",
+            action: #selector(quit),
+            keyEquivalent: "q"
+        ))
+        for entry in menu.items where entry.action != nil {
+            entry.target = self
+        }
+        item.menu = menu
+        statusItem = item
+        refreshTitles()
+    }
+
+    func refreshTitles() {
+        speakTitleItem?.title = "Speak Key: \(HotKeyConfig.speakLabel())"
+        dictateTitleItem?.title = "Dictate Key: \(HotKeyConfig.dictateLabel())"
+        statusMenuItem?.title = statusText()
+        if recordTarget != .none {
+            let which = recordTarget == .speak ? "speak" : "dictate"
+            statusMenuItem?.title = "Recording \(which) — tap a modifier (Esc cancel)"
+        }
+    }
+
+    private func statusText() -> String {
+        let p = permissionState()
+        if eventTap != nil, p.ax, p.listen {
+            return "Status: armed"
+        }
+        if !p.ax { return "Status: need Accessibility" }
+        if !p.listen { return "Status: need Input Monitoring" }
+        return "Status: tap not armed"
+    }
+
+    @objc private func setSpeakKey() {
+        beginRecord(.speak)
+    }
+
+    @objc private func setDictateKey() {
+        beginRecord(.dictate)
+    }
+
+    @objc private func openAccessibility() {
+        openPrivacyPane("Privacy_Accessibility")
+        openPrivacyPane("Privacy_ListenEvent")
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
+    private func beginRecord(_ target: RecordTarget) {
+        cancelRecordTimeout()
+        recordTarget = target
+        recordDownCode = nil
+        recordDeadline = Date().addingTimeInterval(recordTimeout)
+        let work = DispatchWorkItem { [weak self] in
+            guard recordTarget == target else { return }
+            log("record: timeout")
+            recordTarget = .none
+            recordDownCode = nil
+            self?.refreshTitles()
+        }
+        recordTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + recordTimeout, execute: work)
+        log("record: waiting for \(target == .speak ? "speak" : "dictate") modifier")
+        refreshTitles()
+    }
+
+    func cancelRecording(reason: String) {
+        cancelRecordTimeout()
+        if recordTarget != .none {
+            log("record: \(reason)")
+        }
+        recordTarget = .none
+        recordDownCode = nil
+        recordDeadline = nil
+        refreshTitles()
+    }
+
+    private func cancelRecordTimeout() {
+        recordTimeoutWork?.cancel()
+        recordTimeoutWork = nil
+    }
+
+    func finishRecording(code: Int64) {
+        guard HotKeyConfig.isBindableModifier(code) else {
+            cancelRecording(reason: "unsupported key \(code)")
+            return
+        }
+        switch recordTarget {
+        case .speak:
+            if HotKeyConfig.isDictateKey(code) && HotKeyConfig.dictateExact {
+                cancelRecording(reason: "same as dictate key")
+                return
+            }
+            if !HotKeyConfig.dictateExact && code == rightCommandKeyCode {
+                cancelRecording(reason: "same as dictate key")
+                return
+            }
+            HotKeyConfig.speakKeyCode = code
+            log("record: speak → \(HotKeyConfig.displayName(for: code))")
+        case .dictate:
+            if HotKeyConfig.isSpeakKey(code) {
+                cancelRecording(reason: "same as speak key")
+                return
+            }
+            HotKeyConfig.dictateKeyCode = code
+            log("record: dictate → \(HotKeyConfig.displayName(for: code))")
+        case .none:
+            return
+        }
+        cancelRecordTimeout()
+        recordTarget = .none
+        recordDownCode = nil
+        recordDeadline = nil
+        refreshTitles()
+    }
+}
 
 func sayRunning() -> Bool {
     let p = Process()
@@ -152,10 +434,13 @@ func pasteToFront(_ string: String) {
     postKey(0x09, flags: .maskCommand)
 }
 
-func replayRightCommandDown() {
+func replayDictateKeyDown() {
+    let code = CGKeyCode(HotKeyConfig.dictateKeyCode)
     guard let src = CGEventSource(stateID: .hidSystemState),
-          let e = CGEvent(keyboardEventSource: src, virtualKey: 0x36, keyDown: true) else { return }
-    e.flags = .maskCommand
+          let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true),
+          let mask = HotKeyConfig.modifierMask(for: HotKeyConfig.dictateKeyCode)
+    else { return }
+    e.flags = mask
     e.post(tap: .cghidEventTap)
 }
 
@@ -223,8 +508,6 @@ final class DictateEngine {
         task = nil
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        // Prefer on-device when available, but do not require it — BT mics often
-        // return empty transcripts when requiresOnDeviceRecognition is forced.
         self.request = request
         let input = audioEngine.inputNode
         let format = input.inputFormat(forBus: 0)
@@ -249,7 +532,7 @@ final class DictateEngine {
             return
         }
         live = true
-        log("right-command hold → dictate start (stream) \(Int(format.sampleRate))Hz")
+        log("dictate start (stream) \(Int(format.sampleRate))Hz")
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             DispatchQueue.main.async {
                 guard let self, self.live else { return }
@@ -277,7 +560,7 @@ final class DictateEngine {
         task?.finish()
         task = nil
         streamDictate(lastText, typed: &typed)
-        log("right-command hold → dictate stop «\(typed)»")
+        log("dictate stop «\(typed)»")
         lastText = ""
         typed = ""
     }
@@ -298,7 +581,7 @@ func stopDictation() {
 func scheduleDictateHold() {
     cancelDictateHold()
     let work = DispatchWorkItem {
-        if rightCommandDown && rightCommandAlone {
+        if dictateModDown && dictateModAlone {
             startDictation()
         }
     }
@@ -358,6 +641,31 @@ func handleHotKey() {
     log("empty")
 }
 
+private func handleRecording(type: CGEventType, keycode: Int64, event: CGEvent) -> Unmanaged<CGEvent>? {
+    if type == .keyDown && keycode == escapeKeyCode {
+        DispatchQueue.main.async {
+            StatusItemController.shared.cancelRecording(reason: "cancelled")
+        }
+        return nil
+    }
+    guard type == .flagsChanged, HotKeyConfig.isBindableModifier(keycode) else {
+        return Unmanaged.passUnretained(event)
+    }
+    let down = HotKeyConfig.modifierIsDown(code: keycode, flags: event.flags)
+    if down {
+        recordDownCode = keycode
+        return Unmanaged.passUnretained(event)
+    }
+    if let pressed = recordDownCode, pressed == keycode {
+        DispatchQueue.main.async {
+            StatusItemController.shared.finishRecording(code: keycode)
+        }
+        recordDownCode = nil
+        return Unmanaged.passUnretained(event)
+    }
+    return Unmanaged.passUnretained(event)
+}
+
 private func eventTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
@@ -379,64 +687,70 @@ private func eventTapCallback(
 
     let keycode = event.getIntegerValueField(.keyboardEventKeycode)
 
-    // Left Command only (right Command is dictate).
-    if type == .flagsChanged && keycode == 55 {
-        if event.flags.contains(.maskCommand) { log("left-command (ignored — use Right Command)") }
-        return Unmanaged.passUnretained(event)
+    if recordTarget != .none {
+        if let deadline = recordDeadline, Date() > deadline {
+            DispatchQueue.main.async {
+                StatusItemController.shared.cancelRecording(reason: "timeout")
+            }
+        } else {
+            return handleRecording(type: type, keycode: keycode, event: event)
+        }
     }
 
-    // Either Option — some boards have no Right ⌥ (space · ⌘ · fn · ctrl).
-    if type == .flagsChanged && (keycode == rightOptionKeyCode || keycode == leftOptionKeyCode) {
-        let side = keycode == rightOptionKeyCode ? "right" : "left"
-        let down = event.flags.contains(.maskAlternate)
-        if down && !optionDown {
-            optionDown = true
-            optionAlone = true
-            log("\(side)-option down")
-        } else if !down && optionDown {
-            optionDown = false
-            if optionAlone {
-                log("\(side)-option alone → speak")
+    if type == .flagsChanged && HotKeyConfig.isSpeakKey(keycode) {
+        let down = HotKeyConfig.modifierIsDown(code: keycode, flags: event.flags)
+        if down && !speakModDown {
+            speakModDown = true
+            speakModAlone = true
+            log("speak-key down \(HotKeyConfig.displayName(for: keycode))")
+        } else if !down && speakModDown {
+            speakModDown = false
+            if speakModAlone {
+                log("speak-key alone → speak")
                 DispatchQueue.main.async { handleHotKey() }
             } else {
-                log("\(side)-option chord (ignored)")
+                log("speak-key chord (ignored)")
             }
-            optionAlone = false
+            speakModAlone = false
         }
         return Unmanaged.passUnretained(event)
     }
 
-    if type == .flagsChanged && keycode == rightCommandKeyCode {
-        if !rightCommandDown {
-            rightCommandDown = true
-            rightCommandAlone = true
-            log("right-command down")
+    if type == .flagsChanged && HotKeyConfig.isDictateKey(keycode) {
+        let down = HotKeyConfig.modifierIsDown(code: keycode, flags: event.flags)
+        if down && !dictateModDown {
+            dictateModDown = true
+            dictateModAlone = true
+            log("dictate-key down \(HotKeyConfig.displayName(for: keycode))")
             DispatchQueue.main.async { scheduleDictateHold() }
             return nil
         }
-        rightCommandDown = false
-        cancelDictateHold()
-        let wasChord = !rightCommandAlone
-        let dictating = isDictating
-        rightCommandAlone = false
-        if dictating {
-            DispatchQueue.main.async { stopDictation() }
+        if !down && dictateModDown {
+            dictateModDown = false
+            cancelDictateHold()
+            let wasChord = !dictateModAlone
+            let dictating = isDictating
+            dictateModAlone = false
+            if dictating {
+                DispatchQueue.main.async { stopDictation() }
+                return nil
+            }
+            if wasChord {
+                return Unmanaged.passUnretained(event)
+            }
             return nil
-        }
-        if wasChord {
-            return Unmanaged.passUnretained(event)
         }
         return nil
     }
 
     if type == .keyDown {
-        if optionDown {
-            optionAlone = false
+        if speakModDown {
+            speakModAlone = false
         }
-        if rightCommandDown && !isDictating {
-            rightCommandAlone = false
+        if dictateModDown && !isDictating {
+            dictateModAlone = false
             cancelDictateHold()
-            replayRightCommandDown()
+            replayDictateKeyDown()
         }
     }
 
@@ -478,17 +792,20 @@ func log(_ s: String) {
 func armTap() {
     if let existing = eventTap {
         CGEvent.tapEnable(tap: existing, enable: true)
+        DispatchQueue.main.async { StatusItemController.shared.refreshTitles() }
         return
     }
     guard let tap = createTap() else {
         log("talk-keys: tap not created (need Accessibility)")
+        DispatchQueue.main.async { StatusItemController.shared.refreshTitles() }
         return
     }
     eventTap = tap
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    log("talk-keys: Option tap (L/R) + Right Command hold armed")
+    log("talk-keys: speak=\(HotKeyConfig.speakLabel()) dictate=\(HotKeyConfig.dictateLabel()) armed")
+    DispatchQueue.main.async { StatusItemController.shared.refreshTitles() }
 }
 
 func permissionState() -> (ax: Bool, listen: Bool) {
@@ -515,6 +832,7 @@ func promptIfNeeded() {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 DispatchQueue.main.async {
+    StatusItemController.shared.install()
     promptIfNeeded()
     if eventTap == nil {
         var last = ""
@@ -529,6 +847,7 @@ DispatchQueue.main.async {
             if line != last {
                 log("talk-keys waiting \(line) — toggle Talk Keys off/on in both panes")
                 last = line
+                StatusItemController.shared.refreshTitles()
             }
         }
     }

@@ -1,3 +1,9 @@
+0.29.0
+
+  Add menubar key picker
+  Default speak to Control
+  Persist hotkey bindings
+
 0.28.0
 
   Speak on either Option

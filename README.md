@@ -2,7 +2,7 @@
   <img src="docs/characters/talku-banner.jpg" width="100%" alt="Talku">
   <h1 align="center" style="border-bottom: none; margin-bottom: 0;">Talk Keys</h1>
   <h3 align="center" style="margin-top: 0; font-weight: normal;">
-    tap right option to speak · hold right command to dictate
+    menubar picks your keys · control tap speaks · right command hold dictates
   </h3>
   <p><em>the little speaker who reads what you highlight</em> · starring <strong>Talku</strong></p>
 </div>
@@ -22,17 +22,17 @@ Turn on **Talk Keys** in **both** panes (not optional):
 1. System Settings → Privacy & Security → **Accessibility**
 2. System Settings → Privacy & Security → **Input Monitoring**
 
-Accessibility off → `tap not created`. Input Monitoring off → the tap never sees Option. If the toggles were already on from an older build, turn them **off then on**. Then:
+Accessibility off → `tap not created`. Input Monitoring off → the tap never sees your hotkeys. If the toggles were already on from an older build, turn them **off then on**. Then:
 
 ```bash
 talk-keys restart
 ```
 
-`talk-keys status` must show `AX=true ListenEvent=true` and `Option tap (L/R) + Right Command hold armed`. Toggles do not attach to the already-running process until restart.
+`talk-keys status` must show `AX=true ListenEvent=true` and `speak=… dictate=… armed`. Toggles do not attach to the already-running process until restart.
 
 macOS will ask to allow a Background Item named **open**. That **is** Talk Keys (launchd runs `/usr/bin/open` so TCC sticks to the app). Allow it. Deny it and Talk Keys will not start at login.
 
-Select text. Tap **Option** (left or right) to hear it. Hold **Right Command** to dictate into the focused field.
+Look for the **ear** icon in the menu bar. Defaults: tap **Control** (left or right) to speak; hold **Right Command** to dictate. Use **Set Speak Key…** / **Set Dictate Key…** if your board has no Option (e.g. `space · ⌘ · fn · ctrl`).
 
 Allow **Microphone** and **Speech Recognition** when prompted. Hold types into Warp, Grok, and other PTYs (system Dictation only fills AppKit text views).
 
@@ -41,9 +41,10 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 ## ✨ What's Included
 
 ### 🗣️ **Speak on a modifier tap**
-- **Option alone** (left or right) speaks the current highlight (or the clipboard)
+- **Control alone** (left or right by default) speaks the current highlight (or the clipboard)
+- Rebind any modifier from the menubar (**Set Speak Key…**)
 - **Second tap** stops `say`
-- **Option+key chords** still work (accents, Warp Alt on Left Option, menus)
+- Modifier+key chords are ignored for speak
 
 ### 🎙️ **Hold to dictate**
 - **Hold Right Command ~200ms** records; words **type as they are recognized**; release finalizes
@@ -69,11 +70,11 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 
 ## 📖 How It Works
 
-Right Option is a modifier. Carbon `RegisterEventHotKey` cannot bind a modifier alone, so Talk Keys installs a session `CGEventTap`.
+Speak/dictate keys are modifiers. Carbon `RegisterEventHotKey` cannot bind a modifier alone, so Talk Keys installs a session `CGEventTap`.
 
 1. **flagsChanged** on keycode `61` (`kVK_RightOption`): press starts an “alone” wait; any other keyDown while held cancels it.
 2. **Release with no other key** reads AX selected text, then the pasteboard. In a browser it may post `Cmd+C` to the front app. In Ghostty / Warp / other terminals it does **not** copy — Grok’s Copied toast already filled the pasteboard, and a synthetic `Cmd+C` overwrites it with the page URL.
-3. **`/usr/bin/say`** speaks that text. A second Right Option tap runs `pkill -x say`. URL-only strings and full-window AX dumps are skipped.
+3. **`/usr/bin/say`** speaks that text. A second speak-key tap runs `pkill -x say`. URL-only strings and full-window AX dumps are skipped.
 4. **Right Command** (`54`) hold ~200ms starts Speech recognition. New words are pasted into the front app (Warp PTY), not typed as HID unicode.
 
 `listenOnly` taps can “succeed” with no events when TCC is missing. Talk Keys uses **`.defaultTap`** (returns nil without Accessibility) and keeps Option+key passthrough.
@@ -123,13 +124,13 @@ macOS treats keyboard taps and synthetic `Cmd+C` as two different TCC services.
 | **Accessibility** | `AXIsProcessTrusted` | Post `Cmd+C`; create a `.defaultTap` |
 | **Input Monitoring** | `CGPreflightListenEventAccess` | Read key events system-wide |
 
-Without Input Monitoring the daemon can look “armed” and still never see Right Option (the Warp / Grok failure mode). Accessibility off is louder: `tap not created`.
+Without Input Monitoring the daemon can look “armed” and still never see hotkeys (the Warp / Grok failure mode). Accessibility off is louder: `tap not created`.
 
 On first launch with either grant missing, Talk Keys shows **Talk Keys Needs Permission** and opens the Settings panes. Toggle Talk Keys off/on in **both** panes, then `talk-keys restart`. The running process keeps `AX=false` until it relaunches. Wait for:
 
 ```
 talk-keys permissions AX=true ListenEvent=true
-talk-keys: Right Option tap + Right Command hold armed
+talk-keys: speak=⌃ (L/R) dictate=Right ⌘ armed
 ```
 
 Recompile / re-sign changes the app CDHash and **drops both grants**. `talk-keys restart` does not rebuild on purpose. After a real `install` rebuild, toggle Talk Keys off/on in both panes, then `talk-keys restart`.
@@ -202,7 +203,7 @@ Healthy tap:
 
 ```
 talk-keys permissions AX=true ListenEvent=true
-talk-keys: Right Option tap + Right Command hold armed
+talk-keys: speak=⌃ (L/R) dictate=Right ⌘ armed
 right-option down
 right-option alone → speak
 speak clip 128 chars «hello from grok»
@@ -227,11 +228,12 @@ right-command hold → dictate stop
 - 0.26.0 skips URL-only and full-window AX dumps, and never `Cmd+C` in terminals. Rebuild, re-grant both TCC panes, `talk-keys restart`.
 
 **Tap does nothing (including Warp / Grok)**
-- `talk-keys status` must show `AX=true ListenEvent=true` **and** `Right Option tap + Right Command hold armed`
+- `talk-keys status` must show `AX=true ListenEvent=true` **and** `speak=… dictate=… armed`
+- Menubar ear icon: **Set Speak Key…** / **Set Dictate Key…** to rebind
 - Need **both** Accessibility and Input Monitoring. One pane is not enough.
 - Toggle Talk Keys off/on in both panes, then `talk-keys restart` (not `install`)
 - Drag-select in Warp (`copy_on_select`); a keyboard caret is not a selection
-- In Grok: copy first (toast Copied), then tap Right Option. Shift-drag is the terminal’s native copy.
+- In Grok: copy first (toast Copied), then tap the speak key. Shift-drag is the terminal’s native copy.
 
 **Tap does nothing after install (AX=false)**
 - The permission alert used to block the main thread and stay hidden (`open -g`). 0.27.0 opens both panes and polls. Toggle Talk Keys **off then on** in Accessibility **and** Input Monitoring, then `talk-keys restart`.
@@ -240,7 +242,7 @@ right-command hold → dictate stop
 - `install` rebuilt the binary and TCC dropped. Re-grant both panes, `talk-keys restart`
 
 **Option+S / accents broke**
-- Only a **bare** Option tap speaks. Option+key chords are ignored. Boards with no Right ⌥ (e.g. `space · ⌘ · fn · ctrl`) use **Left Option**.
+- Only a **bare** speak-key tap speaks. Defaults are Control (no Option required). Boards like `space · ⌘ · fn · ctrl` use **Right ⌃** for speak and **Right ⌘** hold for dictate.
 
 **Login Items shows open / I denied it**
 - That item **is** Talk Keys. Re-enable **open** under Allow in the Background, then `talk-keys restart`

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# talk-keys — build / install / control the Right Option speak daemon.
+# talk-keys — build / install / control the speak + dictate daemon.
 # Usage: talk-keys {build|install|uninstall|start|stop|status|restart|doctor}
 
 set -euo pipefail
@@ -139,8 +139,9 @@ doctor() {
   echo "---"
   echo "App: $APP"
   ls -la "$BIN" 2>/dev/null || echo "missing binary"
-  echo "Tap Right Option once, then: tail -f $LOG"
-  echo "Expect: right-option alone → speak; right-command hold → dictate start|stop"
+  echo "Tap speak key (default Control) once, then: tail -f $LOG"
+  echo "Expect: speak-key alone → speak; dictate-key hold → dictate start|stop"
+  echo "Menubar: Set Speak Key… / Set Dictate Key…"
 }
 
 cmd="${1:-status}"
