@@ -1,3 +1,9 @@
+0.32.0
+
+  Prefer dottie-talk koko TTS
+  Auto-start koko if down
+  Fall back to say
+
 0.31.0
 
   Disable KeepAlive relaunch

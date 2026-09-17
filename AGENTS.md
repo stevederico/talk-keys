@@ -8,7 +8,7 @@ Pure Swift. Apple frameworks only. No Karabiner. No SPM. No Homebrew.
 
 | Path | What |
 |---|---|
-| `Sources/talk-keys.swift` | Daemon (event tap, `say`, Speech, paste) |
+| `Sources/talk-keys.swift` | Daemon (event tap, dottie-talk/koko or `say`, Speech, paste) |
 | `scripts/talk-keys` | `build` / `install` / `restart` / `status` / `doctor` |
 | `scripts/build-icons.sh` | Talku art → `AppIcon.icns` (needs Pillow; committed icons are enough) |
 | `Resources/` | `Info.plist`, `AppIcon.icns` |
@@ -37,7 +37,7 @@ tail -f /tmp/talk-keys.log
 - Never `NSAlert.runModal` for TCC: it blocked the retry timer, and launchd `open -g` hid the alert so grants never attached.
 - Adhoc sign only (`codesign -s -`). Recompile drops both TCC panes.
 - Never write the live plist through a **symlink** into this repo (bakes `$HOME` into git). `write_plist` deletes a dest symlink first. Sample path stays `/Users/you/…`.
-- **Speak:** AX selected text (skip URL-only / full-control dumps), then clipboard. In terminals (Ghostty, Warp, …) **never `Cmd+C`** — Grok’s Copied toast already wrote the pasteboard; a synthetic copy clobbers it with `https://x.com` or empty. `Cmd+C` only for non-terminals, still to the front app pid.
+- **Speak:** Prefer **dottie-talk** koko on `:1314` (auto-spawn `ensure-tts.js` / `bin/koko` from `~/Projects/dottie-talk` when down). Fall back to `/usr/bin/say`. Second speak-key tap stops `afplay`/`say`. AX selected text (skip URL-only / full-control dumps), then clipboard. In terminals (Ghostty, Warp, …) **never `Cmd+C`** — Grok’s Copied toast already wrote the pasteboard; a synthetic copy clobbers it with `https://x.com` or empty. `Cmd+C` only for non-terminals, still to the front app pid.
 - **Dictate:** Speech framework (mic + speech TCC), stream by **pasting** `Cmd+V` to the front pid. HID unicode / system Dictation do not reach PTYs. Swallow the dictate modifier while dictating or injected keys become chords.
 - **Menubar:** Set Speak Key… / Set Dictate Key… records next alone-modifier; UserDefaults `speakKeyCode` / `dictateKeyCode`. Defaults Control (L/R) + Right Command.
 - Modifier-alone = `CGEventTap` `.defaultTap` (not Carbon hotkeys, not `listenOnly`).

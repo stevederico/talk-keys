@@ -28,6 +28,13 @@ private var isDictating = false
 private var dictateHoldWork: DispatchWorkItem?
 private var eventTap: CFMachPort?
 private var recordTarget: RecordTarget = .none
+private var speakInFlight = false
+private var speakEpoch = 0
+private var afplayProc: Process?
+private var dottieTTSProc: Process?
+private var dottieEnsureStarted = false
+private let speakQueue = DispatchQueue(label: "com.stevederico.talk-keys.speak")
+private let dottieTTSPort = 1314
 private var recordDeadline: Date?
 private var recordDownCode: Int64?
 
@@ -138,6 +145,7 @@ final class StatusItemController: NSObject {
     private var statusMenuItem: NSMenuItem?
     private var speakTitleItem: NSMenuItem?
     private var dictateTitleItem: NSMenuItem?
+    private var ttsTitleItem: NSMenuItem?
     private var recordTimeoutWork: DispatchWorkItem?
 
     func install() {
@@ -161,6 +169,11 @@ final class StatusItemController: NSObject {
         dictateTitle.isEnabled = false
         menu.addItem(dictateTitle)
         dictateTitleItem = dictateTitle
+
+        let ttsTitle = NSMenuItem(title: ttsStatusText(), action: nil, keyEquivalent: "")
+        ttsTitle.isEnabled = false
+        menu.addItem(ttsTitle)
+        ttsTitleItem = ttsTitle
 
         menu.addItem(NSMenuItem(
             title: "Set Speak Key…",
@@ -201,6 +214,7 @@ final class StatusItemController: NSObject {
     func refreshTitles() {
         speakTitleItem?.title = "Speak Key: \(HotKeyConfig.speakLabel())"
         dictateTitleItem?.title = "Dictate Key: \(HotKeyConfig.dictateLabel())"
+        ttsTitleItem?.title = ttsStatusText()
         statusMenuItem?.title = statusText()
         if recordTarget != .none {
             let which = recordTarget == .speak ? "speak" : "dictate"
@@ -216,6 +230,10 @@ final class StatusItemController: NSObject {
         if !p.ax { return "Status: need Accessibility" }
         if !p.listen { return "Status: need Input Monitoring" }
         return "Status: tap not armed"
+    }
+
+    private func ttsStatusText() -> String {
+        dottieTTSHealthy() ? "TTS: dottie-talk (koko)" : "TTS: say (koko down)"
     }
 
     @objc private func setSpeakKey() {
@@ -304,15 +322,279 @@ final class StatusItemController: NSObject {
     }
 }
 
-func sayRunning() -> Bool {
+func processRunning(_ name: String) -> Bool {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-    p.arguments = ["-xq", "say"]
+    p.arguments = ["-xq", name]
     p.standardOutput = FileHandle.nullDevice
     p.standardError = FileHandle.nullDevice
     try? p.run()
     p.waitUntilExit()
     return p.terminationStatus == 0
+}
+
+func speechBusy() -> Bool {
+    speakInFlight || processRunning("say") || (afplayProc?.isRunning == true) || processRunning("afplay")
+}
+
+func stopSpeech() {
+    speakEpoch += 1
+    speakInFlight = false
+    if let p = afplayProc, p.isRunning {
+        p.terminate()
+    }
+    afplayProc = nil
+    for name in ["say", "afplay"] {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        p.arguments = ["-x", name]
+        try? p.run()
+        p.waitUntilExit()
+    }
+    log("stop")
+}
+
+func dottieTalkRoot() -> URL? {
+    if let env = ProcessInfo.processInfo.environment["DOTTIE_TALK_DIR"], !env.isEmpty {
+        let u = URL(fileURLWithPath: env, isDirectory: true)
+        if FileManager.default.fileExists(atPath: u.appendingPathComponent("bin/koko").path) {
+            return u
+        }
+    }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let candidates = [
+        home.appendingPathComponent("Projects/dottie-talk"),
+        home.appendingPathComponent("Projects/dottie-desktop/backend/gateway/dottie-talk"),
+    ]
+    for u in candidates {
+        if FileManager.default.isExecutableFile(atPath: u.appendingPathComponent("bin/koko").path) {
+            return u
+        }
+    }
+    return nil
+}
+
+func dottieKokoBin() -> URL? {
+    if let env = ProcessInfo.processInfo.environment["DOTTIE_BIN_DIR"], !env.isEmpty {
+        let u = URL(fileURLWithPath: env).appendingPathComponent("koko")
+        if FileManager.default.isExecutableFile(atPath: u.path) { return u }
+    }
+    if let root = dottieTalkRoot() {
+        let u = root.appendingPathComponent("bin/koko")
+        if FileManager.default.isExecutableFile(atPath: u.path) { return u }
+    }
+    for p in ["/usr/local/bin/koko", "/opt/homebrew/bin/koko"] {
+        if FileManager.default.isExecutableFile(atPath: p) {
+            return URL(fileURLWithPath: p)
+        }
+    }
+    return nil
+}
+
+func dottieModelCwd() -> URL {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let legacy = home.appendingPathComponent(".dottie/checkpoints/kokoro-v1.0.onnx")
+    if FileManager.default.fileExists(atPath: legacy.path) {
+        return home.appendingPathComponent(".dottie")
+    }
+    return home.appendingPathComponent(".cache/dottie-talk")
+}
+
+func dottieEspeakData() -> String? {
+    var paths: [String] = []
+    if let root = dottieTalkRoot() {
+        paths.append(root.appendingPathComponent("bin/espeak-ng-data").path)
+    }
+    paths.append(contentsOf: [
+        "/opt/homebrew/share/espeak-ng-data",
+        "/usr/local/share/espeak-ng-data",
+    ])
+    for p in paths {
+        if FileManager.default.fileExists(atPath: (p as NSString).appendingPathComponent("phontab")) {
+            return p
+        }
+    }
+    return nil
+}
+
+func dottieTTSHealthy() -> Bool {
+    let url = URL(string: "http://127.0.0.1:\(dottieTTSPort)/")!
+    var req = URLRequest(url: url, timeoutInterval: 0.35)
+    req.httpMethod = "GET"
+    let sem = DispatchSemaphore(value: 0)
+    var ok = false
+    URLSession.shared.dataTask(with: req) { _, resp, _ in
+        if let http = resp as? HTTPURLResponse, (200..<500).contains(http.statusCode) {
+            ok = true
+        }
+        sem.signal()
+    }.resume()
+    _ = sem.wait(timeout: .now() + 0.4)
+    return ok
+}
+
+func dottieTTSLogHandle() -> FileHandle {
+    let path = "/tmp/dottie-tts.log"
+    if !FileManager.default.fileExists(atPath: path) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+    }
+    return FileHandle(forWritingAtPath: path) ?? FileHandle.nullDevice
+}
+
+func ensureDottieTTS() {
+    if dottieTTSHealthy() { return }
+    guard !dottieEnsureStarted else { return }
+    dottieEnsureStarted = true
+
+    // Prefer Node supervisor (espeak symlinks + model download). Else spawn koko direct.
+    if let root = dottieTalkRoot() {
+        let ensure = root.appendingPathComponent("ensure-tts.js")
+        let node = URL(fileURLWithPath: "/usr/local/bin/node")
+        let nodeBin = FileManager.default.isExecutableFile(atPath: node.path)
+            ? node
+            : URL(fileURLWithPath: "/opt/homebrew/bin/node")
+        if FileManager.default.fileExists(atPath: ensure.path),
+           FileManager.default.isExecutableFile(atPath: nodeBin.path)
+        {
+            let p = Process()
+            p.executableURL = nodeBin
+            p.arguments = [ensure.path]
+            p.currentDirectoryURL = root
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = dottieTTSLogHandle()
+            do {
+                try p.run()
+                dottieTTSProc = p
+                log("dottie-tts: starting ensure-tts.js")
+                return
+            } catch {
+                log("dottie-tts: ensure-tts failed \(error.localizedDescription)")
+            }
+        }
+    }
+
+    guard let koko = dottieKokoBin() else {
+        log("dottie-tts: koko binary missing — speak falls back to say")
+        return
+    }
+    let p = Process()
+    p.executableURL = koko
+    p.arguments = ["openai", "--port", "\(dottieTTSPort)", "--ip", "127.0.0.1"]
+    p.currentDirectoryURL = dottieModelCwd()
+    var env = ProcessInfo.processInfo.environment
+    if let espeak = dottieEspeakData() {
+        env["PIPER_ESPEAKNG_DATA_DIRECTORY"] = espeak
+    }
+    p.environment = env
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = dottieTTSLogHandle()
+    do {
+        try p.run()
+        dottieTTSProc = p
+        log("dottie-tts: spawned koko :\(dottieTTSPort)")
+    } catch {
+        log("dottie-tts: spawn failed \(error.localizedDescription)")
+    }
+}
+
+func speakViaDottie(_ text: String, epoch: Int) -> Bool {
+    let url = URL(string: "http://127.0.0.1:\(dottieTTSPort)/v1/audio/speech")!
+    var req = URLRequest(url: url, timeoutInterval: 60)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    let body: [String: String] = ["input": text, "model": "kokoro"]
+    guard let data = try? JSONSerialization.data(withJSONObject: body) else { return false }
+    req.httpBody = data
+
+    let sem = DispatchSemaphore(value: 0)
+    var audio: Data?
+    var status = 0
+    URLSession.shared.dataTask(with: req) { data, resp, _ in
+        status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        audio = data
+        sem.signal()
+    }.resume()
+    _ = sem.wait(timeout: .now() + 60)
+    guard epoch == speakEpoch else { return true }
+    guard status == 200, let audio, !audio.isEmpty else {
+        log("dottie-tts: speech HTTP \(status)")
+        return false
+    }
+
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("talk-keys-\(ProcessInfo.processInfo.processIdentifier).mp3")
+    do {
+        try audio.write(to: tmp, options: .atomic)
+    } catch {
+        log("dottie-tts: write failed \(error.localizedDescription)")
+        return false
+    }
+
+    guard epoch == speakEpoch else {
+        try? FileManager.default.removeItem(at: tmp)
+        return true
+    }
+
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+    p.arguments = [tmp.path]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    do {
+        try p.run()
+        afplayProc = p
+        p.waitUntilExit()
+        afplayProc = nil
+        try? FileManager.default.removeItem(at: tmp)
+        return true
+    } catch {
+        log("dottie-tts: afplay failed \(error.localizedDescription)")
+        return false
+    }
+}
+
+func speakViaSay(_ text: String, epoch: Int) {
+    guard epoch == speakEpoch else { return }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+    let pipe = Pipe()
+    p.standardInput = pipe
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try? p.run()
+    if let data = text.data(using: .utf8) {
+        try? pipe.fileHandleForWriting.write(contentsOf: data)
+    }
+    try? pipe.fileHandleForWriting.close()
+    p.waitUntilExit()
+}
+
+func speak(_ text: String) {
+    speakQueue.async {
+        let epoch = speakEpoch
+        speakInFlight = true
+        defer {
+            if epoch == speakEpoch { speakInFlight = false }
+        }
+        ensureDottieTTS()
+        if !dottieTTSHealthy() {
+            for _ in 0..<40 {
+                if epoch != speakEpoch { return }
+                if dottieTTSHealthy() { break }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+        }
+        guard epoch == speakEpoch else { return }
+        if dottieTTSHealthy() {
+            log("speak engine=koko")
+            if speakViaDottie(text, epoch: epoch) { return }
+            guard epoch == speakEpoch else { return }
+            log("speak koko failed — falling back to say")
+        } else {
+            log("speak engine=say (koko unavailable)")
+        }
+        speakViaSay(text, epoch: epoch)
+    }
 }
 
 func clipboardString() -> String {
@@ -383,20 +665,6 @@ func pressCopy() {
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }
-}
-
-func speak(_ text: String) {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-    let pipe = Pipe()
-    p.standardInput = pipe
-    p.standardOutput = FileHandle.nullDevice
-    p.standardError = FileHandle.nullDevice
-    try? p.run()
-    if let data = text.data(using: .utf8) {
-        try? pipe.fileHandleForWriting.write(contentsOf: data)
-    }
-    try? pipe.fileHandleForWriting.close()
 }
 
 func cancelDictateHold() {
@@ -596,13 +864,8 @@ func speakNow(_ text: String, via: String) {
 }
 
 func handleHotKey() {
-    if sayRunning() {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        p.arguments = ["-x", "say"]
-        try? p.run()
-        p.waitUntilExit()
-        log("stop")
+    if speechBusy() {
+        stopSpeech()
         return
     }
     let before = clipboardString()
@@ -806,6 +1069,7 @@ func armTap() {
     CGEvent.tapEnable(tap: tap, enable: true)
     log("talk-keys: speak=\(HotKeyConfig.speakLabel()) dictate=\(HotKeyConfig.dictateLabel()) armed")
     DispatchQueue.main.async { StatusItemController.shared.refreshTitles() }
+    DispatchQueue.global(qos: .utility).async { ensureDottieTTS() }
 }
 
 func permissionState() -> (ax: Bool, listen: Bool) {

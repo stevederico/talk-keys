@@ -43,8 +43,9 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 ### 🗣️ **Speak on a modifier tap**
 - **Control alone** (left or right by default) speaks the current highlight (or the clipboard)
 - Rebind any modifier from the menubar (**Set Speak Key…**)
-- **Second tap** stops `say`
+- **Second tap** stops playback (`afplay` / `say`)
 - Modifier+key chords are ignored for speak
+- Speaks via **dottie-talk koko** when available; else Apple `say`
 
 ### 🎙️ **Hold to dictate**
 - **Hold Right Command ~200ms** records; words **type as they are recognized**; release finalizes
@@ -58,7 +59,8 @@ Allow **Microphone** and **Speech Recognition** when prompted. Hold types into W
 ### 🔒 **No third-party remappers**
 - **Pure Swift** using AppKit, ApplicationServices, and Foundation
 - **No Karabiner**, Homebrew, or Swift packages
-- **macOS `say`** for speech (system voice)
+- **macOS `say`** fallback when dottie-talk/koko is down; prefers local **koko** TTS (`:1314`)
+- **Dictate** still Apple Speech (not parakeet)
 
 ### 🖥️ **Always on**
 - **Talk Keys.app** at `~/Applications/Talk Keys.app` (menu-bar-less, `LSUIElement`)
@@ -74,7 +76,7 @@ Speak/dictate keys are modifiers. Carbon `RegisterEventHotKey` cannot bind a mod
 
 1. **flagsChanged** on keycode `61` (`kVK_RightOption`): press starts an “alone” wait; any other keyDown while held cancels it.
 2. **Release with no other key** reads AX selected text, then the pasteboard. In a browser it may post `Cmd+C` to the front app. In Ghostty / Warp / other terminals it does **not** copy — Grok’s Copied toast already filled the pasteboard, and a synthetic `Cmd+C` overwrites it with the page URL.
-3. **`/usr/bin/say`** speaks that text. A second speak-key tap runs `pkill -x say`. URL-only strings and full-window AX dumps are skipped.
+3. Speaks via **dottie-talk** koko (`POST :1314/v1/audio/speech` → `afplay`). If koko is down, Talk Keys starts `~/Projects/dottie-talk/ensure-tts.js` (or `bin/koko`) once, then falls back to `/usr/bin/say`. A second speak-key tap stops playback. URL-only strings and full-window AX dumps are skipped.
 4. **Right Command** (`54`) hold ~200ms starts Speech recognition. New words are pasted into the front app (Warp PTY), not typed as HID unicode.
 
 `listenOnly` taps can “succeed” with no events when TCC is missing. Talk Keys uses **`.defaultTap`** (returns nil without Accessibility) and keeps Option+key passthrough.
