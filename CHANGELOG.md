@@ -1,3 +1,8 @@
+0.33.0
+
+  Add speak-test CLI
+  Prove koko speak path
+
 0.32.0
 
   Prefer dottie-talk koko TTS

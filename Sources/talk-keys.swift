@@ -1095,6 +1095,34 @@ func promptIfNeeded() {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+
+if let idx = CommandLine.arguments.firstIndex(of: "--speak-test") {
+    let text: String = {
+        let next = idx + 1
+        if next < CommandLine.arguments.count {
+            let cand = CommandLine.arguments[next]
+            if !cand.hasPrefix("-") { return cand }
+        }
+        return "Talk Keys dottie talk test"
+    }()
+    log("speak-test: «\(text.prefix(80))»")
+    ensureDottieTTS()
+    for _ in 0..<40 {
+        if dottieTTSHealthy() { break }
+        Thread.sleep(forTimeInterval: 0.25)
+    }
+    if dottieTTSHealthy() {
+        log("speak-test: engine=koko")
+        let ok = speakViaDottie(text, epoch: speakEpoch)
+        log(ok ? "speak-test: PASS koko" : "speak-test: FAIL koko")
+        exit(ok ? 0 : 1)
+    }
+    log("speak-test: engine=say (koko unavailable)")
+    speakViaSay(text, epoch: speakEpoch)
+    log("speak-test: PASS say-fallback")
+    exit(0)
+}
+
 DispatchQueue.main.async {
     StatusItemController.shared.install()
     promptIfNeeded()
