@@ -1,3 +1,8 @@
+0.34.0
+
+  Menubar speaking icon
+  Menubar listening icon
+
 0.33.0
 
   Add speak-test CLI

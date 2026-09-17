@@ -32,7 +32,7 @@ talk-keys restart
 
 macOS will ask to allow a Background Item named **open**. That **is** Talk Keys (launchd runs `/usr/bin/open` so TCC sticks to the app). Allow it. Deny it and Talk Keys will not start at login.
 
-Look for the **ear** icon in the menu bar. Defaults: tap **Control** (left or right) to speak; hold **Right Command** to dictate. Use **Set Speak Key…** / **Set Dictate Key…** if your board has no Option (e.g. `space · ⌘ · fn · ctrl`).
+Look for the **ear** icon in the menu bar (switches to a **speaker** while speaking, **mic** while dictating). Defaults: tap **Control** (left or right) to speak; hold **Right Command** to dictate. Use **Set Speak Key…** / **Set Dictate Key…** if your board has no Option (e.g. `space · ⌘ · fn · ctrl`).
 
 Allow **Microphone** and **Speech Recognition** when prompted. Hold types into Warp, Grok, and other PTYs (system Dictation only fills AppKit text views).
 

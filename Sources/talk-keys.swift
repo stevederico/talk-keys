@@ -141,24 +141,24 @@ enum HotKeyConfig {
 final class StatusItemController: NSObject {
     static let shared = StatusItemController()
 
+    enum Activity {
+        case idle
+        case speaking
+        case listening
+    }
+
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
     private var speakTitleItem: NSMenuItem?
     private var dictateTitleItem: NSMenuItem?
     private var ttsTitleItem: NSMenuItem?
     private var recordTimeoutWork: DispatchWorkItem?
+    private var activity: Activity = .idle
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = item.button {
-            if let img = NSImage(systemSymbolName: "ear", accessibilityDescription: "Talk Keys") {
-                img.isTemplate = true
-                button.image = img
-            } else {
-                button.title = "TK"
-            }
-            button.toolTip = "Talk Keys"
-        }
+        statusItem = item
+        applyIcon()
         let menu = NSMenu()
         let speakTitle = NSMenuItem(title: "Speak Key: \(HotKeyConfig.speakLabel())", action: nil, keyEquivalent: "")
         speakTitle.isEnabled = false
@@ -207,8 +207,49 @@ final class StatusItemController: NSObject {
             entry.target = self
         }
         item.menu = menu
-        statusItem = item
         refreshTitles()
+    }
+
+    func setActivity(_ next: Activity) {
+        let apply = { [weak self] in
+            guard let self else { return }
+            if self.activity == next { return }
+            self.activity = next
+            self.applyIcon()
+            self.refreshTitles()
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+    }
+
+    private func applyIcon() {
+        guard let button = statusItem?.button else { return }
+        let (symbol, tip): (String, String) = {
+            switch activity {
+            case .speaking:
+                return ("speaker.wave.2.fill", "Talk Keys — Speaking…")
+            case .listening:
+                return ("mic.fill", "Talk Keys — Listening…")
+            case .idle:
+                return ("ear", "Talk Keys")
+            }
+        }()
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tip) {
+            img.isTemplate = true
+            button.image = img
+            button.title = ""
+        } else {
+            button.image = nil
+            switch activity {
+            case .speaking: button.title = "…"
+            case .listening: button.title = "mic"
+            case .idle: button.title = "TK"
+            }
+        }
+        button.toolTip = tip
     }
 
     func refreshTitles() {
@@ -223,6 +264,11 @@ final class StatusItemController: NSObject {
     }
 
     private func statusText() -> String {
+        switch activity {
+        case .speaking: return "Status: Speaking…"
+        case .listening: return "Status: Listening…"
+        case .idle: break
+        }
         let p = permissionState()
         if eventTap != nil, p.ax, p.listen {
             return "Status: armed"
@@ -351,6 +397,7 @@ func stopSpeech() {
         try? p.run()
         p.waitUntilExit()
     }
+    StatusItemController.shared.setActivity(isDictating ? .listening : .idle)
     log("stop")
 }
 
@@ -570,11 +617,15 @@ func speakViaSay(_ text: String, epoch: Int) {
 }
 
 func speak(_ text: String) {
+    StatusItemController.shared.setActivity(.speaking)
     speakQueue.async {
         let epoch = speakEpoch
         speakInFlight = true
         defer {
-            if epoch == speakEpoch { speakInFlight = false }
+            if epoch == speakEpoch {
+                speakInFlight = false
+                StatusItemController.shared.setActivity(isDictating ? .listening : .idle)
+            }
         }
         ensureDottieTTS()
         if !dottieTTSHealthy() {
@@ -837,12 +888,15 @@ final class DictateEngine {
 func startDictation() {
     guard !isDictating else { return }
     isDictating = true
+    StatusItemController.shared.setActivity(.listening)
+    log("dictate listen")
     DictateEngine.shared.start()
 }
 
 func stopDictation() {
     guard isDictating else { return }
     isDictating = false
+    StatusItemController.shared.setActivity(speakInFlight ? .speaking : .idle)
     DictateEngine.shared.stop()
 }
 
@@ -868,6 +922,7 @@ func handleHotKey() {
         stopSpeech()
         return
     }
+    StatusItemController.shared.setActivity(.speaking)
     let before = clipboardString()
     let ax = axSelectedText()
     // Grok/Warp already copied. Cmd+C here overwrites with the page URL or nothing.
@@ -880,6 +935,7 @@ func handleHotKey() {
             speakNow(ax, via: "AX")
             return
         }
+        StatusItemController.shared.setActivity(.idle)
         log("empty")
         return
     }
@@ -901,6 +957,7 @@ func handleHotKey() {
         speakNow(before, via: "clip")
         return
     }
+    StatusItemController.shared.setActivity(.idle)
     log("empty")
 }
 
